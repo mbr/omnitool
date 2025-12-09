@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ pub struct Config {
 
 impl Config {
     /// Get the path to the config file.
-    pub fn config_path() -> Result<PathBuf> {
+    pub fn config_path() -> anyhow::Result<PathBuf> {
         let proj_dirs =
             ProjectDirs::from("", "", "omnitool").context("Failed to get project directories")?;
         let config_dir = proj_dirs.config_dir();
@@ -23,7 +23,7 @@ impl Config {
     }
 
     /// Load configuration from file.
-    pub fn load() -> Result<Config> {
+    pub fn load() -> anyhow::Result<Config> {
         let path = Self::config_path()?;
         if !path.exists() {
             anyhow::bail!("No configuration found. Please run 'login' first.");
@@ -35,7 +35,7 @@ impl Config {
     }
 
     /// Save configuration to file.
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> anyhow::Result<()> {
         let path = Self::config_path()?;
         let contents = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
         fs::write(&path, contents).context("Failed to write config file")?;

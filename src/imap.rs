@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use async_imap::Client;
 use futures::TryStreamExt;
 use tokio::net::TcpStream;
@@ -11,7 +11,7 @@ use crate::config::Config;
 type ImapStream = tokio_util::compat::Compat<TlsStream<TcpStream>>;
 type ImapSession = async_imap::Session<ImapStream>;
 
-pub async fn test_login(config: &Config) -> Result<()> {
+pub async fn test_login(config: &Config) -> anyhow::Result<()> {
     info!("Testing IMAP connection");
     let mut session = connect_and_login(config).await?;
     session.logout().await?;
@@ -19,7 +19,7 @@ pub async fn test_login(config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub async fn search_emails(query: &str) -> Result<Vec<String>> {
+pub async fn search_emails(query: &str) -> anyhow::Result<Vec<String>> {
     let config = Config::load()?;
     let mut session = connect_and_login(&config).await?;
 
@@ -66,7 +66,7 @@ pub async fn search_emails(query: &str) -> Result<Vec<String>> {
     Ok(results)
 }
 
-async fn connect_and_login(config: &Config) -> Result<ImapSession> {
+async fn connect_and_login(config: &Config) -> anyhow::Result<ImapSession> {
     let tcp_stream = TcpStream::connect((config.server.as_str(), config.port))
         .await
         .context("Failed to connect to IMAP server")?;

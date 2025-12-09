@@ -1,7 +1,6 @@
 mod config;
 mod imap;
 
-use anyhow::Result;
 use structopt::StructOpt;
 use tracing::info;
 
@@ -31,7 +30,7 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let cmd = Command::from_args();
