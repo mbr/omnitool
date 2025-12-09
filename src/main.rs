@@ -1,4 +1,6 @@
+/// Configuration management for IMAP credentials and settings.
 mod config;
+/// IMAP client functionality for email operations.
 mod imap;
 
 use structopt::StructOpt;
@@ -21,8 +23,11 @@ enum Command {
         /// Search query
         query: String,
     },
+    /// Start interactive IMAP shell for raw commands
+    Shell,
 }
 
+/// Main entry point for the omnitool IMAP email search application.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cmd = Command::from_args();
@@ -54,6 +59,9 @@ async fn main() -> anyhow::Result<()> {
             for result in results {
                 println!("{}", result);
             }
+        }
+        Command::Shell => {
+            imap::start_shell().await?;
         }
     }
 
