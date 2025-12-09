@@ -1,0 +1,7 @@
+[package]
+name = "omnitool"
+description = "A CLI tool for agentic office work"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
