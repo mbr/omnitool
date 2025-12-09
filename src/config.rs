@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result};
-use dirs;
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -15,10 +15,11 @@ pub struct Config {
 impl Config {
     /// Get the path to the config file.
     pub fn config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir().context("Failed to get config directory")?;
-        let app_dir = config_dir.join("omnitool");
-        fs::create_dir_all(&app_dir).context("Failed to create config directory")?;
-        Ok(app_dir.join("config.json"))
+        let proj_dirs =
+            ProjectDirs::from("", "", "omnitool").context("Failed to get project directories")?;
+        let config_dir = proj_dirs.config_dir();
+        fs::create_dir_all(config_dir).context("Failed to create config directory")?;
+        Ok(config_dir.join("config.json"))
     }
 
     /// Load configuration from file.
