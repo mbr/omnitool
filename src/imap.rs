@@ -4,7 +4,6 @@ use futures::TryStreamExt;
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use tokio_util::compat::TokioAsyncReadCompatExt;
-use tracing::{debug, info};
 
 use crate::config::Config;
 
@@ -12,10 +11,8 @@ type ImapStream = tokio_util::compat::Compat<TlsStream<TcpStream>>;
 type ImapSession = async_imap::Session<ImapStream>;
 
 pub async fn test_login(config: &Config) -> anyhow::Result<()> {
-    info!("Testing IMAP connection");
     let mut session = connect_and_login(config).await?;
     session.logout().await?;
-    debug!("IMAP login test successful");
     Ok(())
 }
 
@@ -89,7 +86,6 @@ async fn connect_and_login(config: &Config) -> anyhow::Result<ImapSession> {
 
     let compat_stream = tls_stream.compat();
     let client = Client::new(compat_stream);
-    debug!("Connected to IMAP server with TLS");
 
     let session = client
         .login(&config.username, &config.password)

@@ -2,7 +2,6 @@ mod config;
 mod imap;
 
 use structopt::StructOpt;
-use tracing::info;
 
 /// Command-line interface for the omnitool IMAP email search application.
 #[derive(StructOpt)]
@@ -26,8 +25,6 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
-
     let cmd = Command::from_args();
 
     match cmd {
@@ -48,11 +45,9 @@ async fn main() -> anyhow::Result<()> {
                 port,
             };
 
-            info!("Testing IMAP connection before saving credentials");
             imap::test_login(&config).await?;
-
             config.save()?;
-            info!("Credentials saved successfully");
+            println!("Credentials saved successfully");
         }
         Command::Search { query } => {
             let results = imap::search_emails(&query).await?;
