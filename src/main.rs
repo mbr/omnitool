@@ -10,12 +10,6 @@ use tracing::info;
 enum Command {
     /// Login to IMAP server and save credentials
     Login {
-        /// Username for IMAP authentication
-        #[structopt(short, long)]
-        username: String,
-        /// App password for IMAP authentication
-        #[structopt(short, long)]
-        password: String,
         /// IMAP server hostname (default: imap.gmail.com)
         #[structopt(short, long, default_value = "imap.gmail.com")]
         server: String,
@@ -37,12 +31,16 @@ async fn main() -> anyhow::Result<()> {
     let cmd = Command::from_args();
 
     match cmd {
-        Command::Login {
-            username,
-            password,
-            server,
-            port,
-        } => {
+        Command::Login { server, port } => {
+            print!("Enter username: ");
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let mut username = String::new();
+            std::io::stdin().read_line(&mut username)?;
+            let username = username.trim().to_string();
+
+            print!("Enter password: ");
+            std::io::Write::flush(&mut std::io::stdout())?;
+            let password = rpassword::read_password()?;
             let config = config::Config {
                 username,
                 password,

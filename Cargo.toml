@@ -8,6 +8,7 @@ edition = "2024"
 anyhow = "1.0.100"
 async-imap = { version = "0.11.1", features = ["tokio"] }
 directories = "5.0"
+rpassword = "7.3"
 futures = "0.3.31"
 rustls = "0.23.35"
 rustls-pki-types = "1.13.1"
