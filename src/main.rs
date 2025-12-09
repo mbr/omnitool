@@ -4,6 +4,7 @@ mod imap;
 use structopt::StructOpt;
 use tracing::info;
 
+/// Command-line interface for the omnitool IMAP email search application.
 #[derive(StructOpt)]
 #[structopt(name = "omnitool", about = "IMAP email search tool")]
 enum Command {

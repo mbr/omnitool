@@ -4,11 +4,16 @@ use anyhow::Context;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+/// Configuration for IMAP connection and authentication.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
+    /// Username for IMAP authentication.
     pub username: String,
+    /// App password for IMAP authentication.
     pub password: String,
+    /// IMAP server hostname.
     pub server: String,
+    /// IMAP server port.
     pub port: u16,
 }
 
