@@ -7,6 +7,20 @@ use crate::{config::Config, imap};
 /// Type alias for an active IMAP session over a TLS connection.
 type ImapSession = imap::ImapSession;
 
+/// Format and print mailbox information from a SELECT or EXAMINE response.
+fn print_mailbox_info(operation: &str, mailbox_name: &str, info: &async_imap::types::Mailbox) {
+    println!("{} mailbox: {}", operation, mailbox_name);
+    println!("  EXISTS: {}", info.exists);
+    println!("  RECENT: {}", info.recent);
+    if let Some(uid_validity) = info.uid_validity {
+        println!("  UIDVALIDITY: {}", uid_validity);
+    }
+    if let Some(uid_next) = info.uid_next {
+        println!("  UIDNEXT: {}", uid_next);
+    }
+    println!("  FLAGS: {:?}", info.flags);
+}
+
 /// IMAP commands that can be executed in the shell.
 #[derive(Debug, StructOpt)]
 pub enum ImapCommand {
@@ -118,16 +132,7 @@ impl ImapCommand {
             }
             ImapCommand::Examine { mailbox } => {
                 let info = session.examine(&mailbox).await?;
-                println!("Examined mailbox: {}", mailbox);
-                println!("  EXISTS: {}", info.exists);
-                println!("  RECENT: {}", info.recent);
-                if let Some(uid_validity) = info.uid_validity {
-                    println!("  UIDVALIDITY: {}", uid_validity);
-                }
-                if let Some(uid_next) = info.uid_next {
-                    println!("  UIDNEXT: {}", uid_next);
-                }
-                println!("  FLAGS: {:?}", info.flags);
+                print_mailbox_info("Examined", &mailbox, &info);
             }
             ImapCommand::Fetch {
                 sequence_set,
@@ -193,24 +198,13 @@ impl ImapCommand {
             }
             ImapCommand::Select { mailbox } => {
                 let info = session.select(&mailbox).await?;
-                println!("Selected mailbox: {}", mailbox);
-                println!("  EXISTS: {}", info.exists);
-                println!("  RECENT: {}", info.recent);
-                if let Some(uid_validity) = info.uid_validity {
-                    println!("  UIDVALIDITY: {}", uid_validity);
-                }
-                if let Some(uid_next) = info.uid_next {
-                    println!("  UIDNEXT: {}", uid_next);
-                }
-                println!("  FLAGS: {:?}", info.flags);
+                print_mailbox_info("Selected", &mailbox, &info);
             }
             ImapCommand::SelectCondstore { mailbox } => {
                 // Note: select_condstore might not be available in async-imap
                 println!("SELECT_CONDSTORE not implemented, using regular SELECT");
                 let info = session.select(&mailbox).await?;
-                println!("Selected mailbox: {}", mailbox);
-                println!("  EXISTS: {}", info.exists);
-                println!("  RECENT: {}", info.recent);
+                print_mailbox_info("Selected", &mailbox, &info);
             }
             ImapCommand::Status { mailbox, items } => {
                 // Note: status might not be available in async-imap
