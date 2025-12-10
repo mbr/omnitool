@@ -10,7 +10,7 @@ use crate::config::Config;
 /// Type alias for the TLS stream used in IMAP connections.
 type ImapStream = tokio_util::compat::Compat<TlsStream<TcpStream>>;
 /// Type alias for an active IMAP session over a TLS connection.
-type ImapSession = async_imap::Session<ImapStream>;
+pub type ImapSession = async_imap::Session<ImapStream>;
 
 /// Test IMAP login with the provided configuration.
 pub async fn test_login(config: &Config) -> anyhow::Result<()> {
@@ -68,7 +68,7 @@ pub async fn search_emails(query: &str) -> anyhow::Result<Vec<String>> {
 }
 
 /// Establish a TLS connection to the IMAP server and authenticate.
-async fn connect_and_login(config: &Config) -> anyhow::Result<ImapSession> {
+pub async fn connect_and_login(config: &Config) -> anyhow::Result<ImapSession> {
     let tcp_stream = TcpStream::connect((config.server.as_str(), config.port))
         .await
         .context("Failed to connect to IMAP server")?;

@@ -1,18 +1,11 @@
-use anyhow::Context;
-use async_imap::Client;
 use futures::TryStreamExt;
 use rustyline::{DefaultEditor, Result as RustylineResult};
 use structopt::StructOpt;
-use tokio::net::TcpStream;
-use tokio_rustls::{TlsConnector, client::TlsStream};
-use tokio_util::compat::TokioAsyncReadCompatExt;
 
-use crate::config::Config;
+use crate::{config::Config, imap};
 
-/// Type alias for the TLS stream used in IMAP connections.
-type ImapStream = tokio_util::compat::Compat<TlsStream<TcpStream>>;
 /// Type alias for an active IMAP session over a TLS connection.
-type ImapSession = async_imap::Session<ImapStream>;
+type ImapSession = imap::ImapSession;
 
 /// IMAP commands that can be executed in the shell.
 #[derive(Debug, StructOpt)]
@@ -244,7 +237,7 @@ impl ImapCommand {
 /// Start an interactive IMAP shell for sending raw commands.
 pub async fn start() -> anyhow::Result<()> {
     let config = Config::load()?;
-    let mut session = connect_and_login(&config).await?;
+    let mut session = imap::connect_and_login(&config).await?;
 
     let mut rl = DefaultEditor::new()
         .map_err(|e| anyhow::anyhow!("Failed to create readline editor: {}", e))?;
@@ -287,37 +280,4 @@ pub async fn start() -> anyhow::Result<()> {
 
     session.logout().await?;
     Ok(())
-}
-
-/// Establish a TLS connection to the IMAP server and authenticate.
-async fn connect_and_login(config: &Config) -> anyhow::Result<ImapSession> {
-    let tcp_stream = TcpStream::connect((config.server.as_str(), config.port))
-        .await
-        .context("Failed to connect to IMAP server")?;
-
-    let mut root_cert_store = rustls::RootCertStore::empty();
-    root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let tls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_cert_store)
-        .with_no_client_auth();
-
-    let connector = TlsConnector::from(std::sync::Arc::new(tls_config));
-    let domain = rustls_pki_types::ServerName::try_from(config.server.clone())
-        .context("Invalid server name")?;
-
-    let tls_stream = connector
-        .connect(domain, tcp_stream)
-        .await
-        .context("Failed to establish TLS connection")?;
-
-    let compat_stream = tls_stream.compat();
-    let client = Client::new(compat_stream);
-
-    let session = client
-        .login(&config.username, &config.password)
-        .await
-        .map_err(|e| anyhow::anyhow!("Login failed: {}", e.0))?;
-
-    Ok(session)
 }
