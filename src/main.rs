@@ -5,6 +5,7 @@ mod imap;
 /// Interactive IMAP shell functionality.
 mod shell;
 
+use datafusion::prelude::SessionContext;
 use structopt::StructOpt;
 
 /// Command-line interface for the omnitool IMAP email search application.
@@ -27,6 +28,8 @@ enum Command {
     },
     /// Start interactive IMAP shell for raw commands
     Shell,
+    /// Datafusion test
+    DfTest,
 }
 
 /// Main entry point for the omnitool IMAP email search application.
@@ -64,6 +67,11 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Shell => {
             shell::start().await?;
+        }
+        Command::DfTest => {
+            let ctx = SessionContext::new();
+            let df = ctx.sql("SELECT 1;").await.expect("query failed");
+            df.show().await?;
         }
     }
 
