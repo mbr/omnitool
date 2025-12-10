@@ -249,8 +249,7 @@ pub async fn start() -> anyhow::Result<()> {
     let mut rl = DefaultEditor::new()
         .map_err(|e| anyhow::anyhow!("Failed to create readline editor: {}", e))?;
 
-    println!("IMAP Shell - Enter IMAP commands. Type 'quit' or 'exit' to exit.");
-    println!("Type 'help' for available commands.");
+    println!("IMAP Shell - Enter IMAP commands, or --help for a command list");
 
     loop {
         let readline: RustylineResult<String> = rl.readline("IMAP> ");
@@ -260,11 +259,7 @@ pub async fn start() -> anyhow::Result<()> {
                 if line.is_empty() {
                     continue;
                 }
-                if line.eq_ignore_ascii_case("quit") || line.eq_ignore_ascii_case("exit") {
-                    break;
-                }
 
-                // Parse the command line using structopt
                 let args: Vec<&str> = line.split_whitespace().collect();
                 let args_with_arg0 = std::iter::once("imapcmd").chain(args.into_iter());
 
@@ -291,7 +286,6 @@ pub async fn start() -> anyhow::Result<()> {
     }
 
     session.logout().await?;
-    println!("Goodbye!");
     Ok(())
 }
 
