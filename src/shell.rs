@@ -263,49 +263,12 @@ pub async fn start() -> anyhow::Result<()> {
                 if line.eq_ignore_ascii_case("quit") || line.eq_ignore_ascii_case("exit") {
                     break;
                 }
-                if line.eq_ignore_ascii_case("help") {
-                    println!("Available commands:");
-                    println!("  capabilities - Get server capabilities");
-                    println!("  check - Checkpoint the selected mailbox");
-                    println!("  close - Close the selected mailbox");
-                    println!("  examine <mailbox> - Examine a mailbox (read-only)");
-                    println!("  fetch <sequence> <items> - Fetch messages");
-                    println!("  idle - Enter IDLE mode");
-                    println!("  list <reference> <mailbox> - List mailboxes");
-                    println!("  noop - Keep connection alive");
-                    println!("  search <criteria> - Search messages");
-                    println!("  select <mailbox> - Select a mailbox");
-                    println!("  subscribe <mailbox> - Subscribe to a mailbox");
-                    println!("  uid-search <criteria> - Search by UID");
-                    println!("  unsubscribe <mailbox> - Unsubscribe from a mailbox");
-                    continue;
-                }
 
                 // Parse the command line using structopt
                 let args: Vec<&str> = line.split_whitespace().collect();
+                let args_with_arg0 = std::iter::once("imapcmd").chain(args.into_iter());
 
-                // Convert command names to match enum variants
-                let args: Vec<String> = if !args.is_empty() {
-                    let mut converted = vec![];
-                    let cmd = args[0].to_lowercase().replace("-", "_");
-
-                    // Map common command names to enum variants
-                    let cmd = match cmd.as_str() {
-                        "capability" => "capabilities",
-                        "uid_search" => "uid-search",
-                        other => other,
-                    };
-
-                    converted.push(cmd.to_string());
-                    for arg in &args[1..] {
-                        converted.push(arg.to_string());
-                    }
-                    converted
-                } else {
-                    vec![]
-                };
-
-                match ImapCommand::from_iter_safe(args.iter()) {
+                match ImapCommand::from_iter_safe(args_with_arg0) {
                     Ok(command) => {
                         if let Err(e) = command.execute(&mut session).await {
                             println!("Error executing command: {}", e);
@@ -316,12 +279,8 @@ pub async fn start() -> anyhow::Result<()> {
                     }
                 }
             }
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                println!("Interrupted");
-                break;
-            }
-            Err(rustyline::error::ReadlineError::Eof) => {
-                println!("EOF");
+            Err(rustyline::error::ReadlineError::Interrupted)
+            | Err(rustyline::error::ReadlineError::Eof) => {
                 break;
             }
             Err(e) => {
