@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use anyhow::Context;
+use directories::ProjectDirs;
 use futures::TryStreamExt;
 use rustyline::{DefaultEditor, Result as RustylineResult};
 use structopt::StructOpt;
@@ -236,6 +240,15 @@ impl ImapCommand {
     }
 }
 
+/// Get the path to the history file.
+fn history_path() -> anyhow::Result<PathBuf> {
+    let proj_dirs =
+        ProjectDirs::from("", "", "omnitool").context("Failed to get project directories")?;
+    let config_dir = proj_dirs.config_dir();
+    std::fs::create_dir_all(config_dir).context("Failed to create config directory")?;
+    Ok(config_dir.join("history.txt"))
+}
+
 /// Start an interactive IMAP shell for sending raw commands.
 pub async fn start() -> anyhow::Result<()> {
     let config = Config::load()?;
@@ -243,6 +256,14 @@ pub async fn start() -> anyhow::Result<()> {
 
     let mut rl = DefaultEditor::new()
         .map_err(|e| anyhow::anyhow!("Failed to create readline editor: {}", e))?;
+
+    // Load history
+    let history_file = history_path()?;
+    if history_file.exists() {
+        if let Err(e) = rl.load_history(&history_file) {
+            eprintln!("Warning: Failed to load history: {}", e);
+        }
+    }
 
     println!("IMAP Shell - Enter IMAP commands, or --help for a command list");
 
@@ -253,6 +274,15 @@ pub async fn start() -> anyhow::Result<()> {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
+                }
+
+                // Add line to history
+                rl.add_history_entry(line)
+                    .map_err(|e| anyhow::anyhow!("Failed to add history entry: {}", e))?;
+
+                // Save history after each command
+                if let Err(e) = rl.save_history(&history_file) {
+                    eprintln!("Warning: Failed to save history: {}", e);
                 }
 
                 let args = match shlex::split(line) {
