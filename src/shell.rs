@@ -255,8 +255,14 @@ pub async fn start() -> anyhow::Result<()> {
                     continue;
                 }
 
-                let args: Vec<&str> = line.split_whitespace().collect();
-                let args_with_arg0 = std::iter::once("imapcmd").chain(args.into_iter());
+                let args = match shlex::split(line) {
+                    Some(args) => args,
+                    None => {
+                        println!("Error: Invalid shell syntax");
+                        continue;
+                    }
+                };
+                let args_with_arg0 = std::iter::once("imapcmd".to_string()).chain(args.into_iter());
 
                 match ImapCommand::from_iter_safe(args_with_arg0) {
                     Ok(command) => {
