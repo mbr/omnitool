@@ -21,6 +21,21 @@ fn print_mailbox_info(operation: &str, mailbox_name: &str, info: &async_imap::ty
     println!("  FLAGS: {:?}", info.flags);
 }
 
+/// Format and print fetched message information.
+fn print_fetch_results(messages: &[async_imap::types::Fetch]) {
+    println!("Fetched {} messages", messages.len());
+    for msg in messages.iter() {
+        if let Some(envelope) = msg.envelope() {
+            if let Some(subject) = &envelope.subject {
+                println!("  Subject: {}", String::from_utf8_lossy(subject));
+            }
+        }
+        println!("  UID: {:?}", msg.uid);
+        let flags: Vec<_> = msg.flags().collect();
+        println!("  FLAGS: {:?}", flags);
+    }
+}
+
 /// IMAP commands that can be executed in the shell.
 #[derive(Debug, StructOpt)]
 pub enum ImapCommand {
@@ -140,17 +155,7 @@ impl ImapCommand {
             } => {
                 let messages = session.fetch(&sequence_set, &items).await?;
                 let messages: Vec<_> = messages.try_collect().await?;
-                println!("Fetched {} messages", messages.len());
-                for msg in messages.iter() {
-                    if let Some(envelope) = msg.envelope() {
-                        if let Some(subject) = &envelope.subject {
-                            println!("  Subject: {}", String::from_utf8_lossy(subject));
-                        }
-                    }
-                    println!("  UID: {:?}", msg.uid);
-                    let flags: Vec<_> = msg.flags().collect();
-                    println!("  FLAGS: {:?}", flags);
-                }
+                print_fetch_results(&messages);
             }
             ImapCommand::GetMetadata { mailbox, entry } => {
                 // Note: get_metadata might not be available in async-imap
