@@ -158,23 +158,27 @@ impl ImapCommand {
                 }
             }
             ImapCommand::GetMetadata { mailbox, entry } => {
-                // Note: get_metadata might not be available in async-imap
-                println!("GET_METADATA not implemented in async-imap");
-                let _ = (mailbox, entry);
+                let metadata = session.get_metadata(&mailbox, "", &entry).await?;
+                println!("Metadata for {}: {:?}", mailbox, metadata);
             }
             ImapCommand::GetQuota { quota_root } => {
-                // Note: get_quota might not be available in async-imap
-                println!("GET_QUOTA not implemented in async-imap");
-                let _ = quota_root;
+                let quota = session.get_quota(&quota_root).await?;
+                println!("Quota for {}: {:?}", quota_root, quota);
             }
             ImapCommand::Id { parameters } => {
-                // Note: id might not be available in async-imap
-                println!("ID not implemented in async-imap");
-                let _ = parameters;
+                if parameters.len() % 2 != 0 {
+                    return Err(anyhow::anyhow!("ID parameters must be key-value pairs"));
+                }
+                let pairs: Vec<(&str, Option<&str>)> = parameters
+                    .chunks(2)
+                    .map(|chunk| (chunk[0].as_str(), Some(chunk[1].as_str())))
+                    .collect();
+                let response = session.id(pairs).await?;
+                println!("ID response: {:?}", response);
             }
             ImapCommand::IdNil => {
-                // Note: id_nil might not be available in async-imap
-                println!("ID NIL not implemented in async-imap");
+                let response = session.id_nil().await?;
+                println!("ID NIL response: {:?}", response);
             }
             ImapCommand::Idle => {
                 // Note: IDLE takes ownership of the session, which conflicts with our shell loop
@@ -212,9 +216,8 @@ impl ImapCommand {
                 print_mailbox_info("Selected", &mailbox, &info);
             }
             ImapCommand::Status { mailbox, items } => {
-                // Note: status might not be available in async-imap
-                println!("STATUS not fully implemented in async-imap");
-                let _ = (mailbox, items);
+                let status = session.status(&mailbox, &items).await?;
+                println!("Status for {}: {:?}", mailbox, status);
             }
             ImapCommand::Subscribe { mailbox } => {
                 session.subscribe(&mailbox).await?;
