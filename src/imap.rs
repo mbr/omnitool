@@ -1,7 +1,6 @@
 use anyhow::Context;
 use async_imap::Client;
 use futures::TryStreamExt;
-use rustyline::{DefaultEditor, Result as RustylineResult};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -66,109 +65,6 @@ pub async fn search_emails(query: &str) -> anyhow::Result<Vec<String>> {
 
     session.logout().await?;
     Ok(results)
-}
-
-/// Start an interactive IMAP shell for sending raw commands.
-pub async fn start_shell() -> anyhow::Result<()> {
-    let config = Config::load()?;
-    let mut session = connect_and_login(&config).await?;
-
-    let mut rl = DefaultEditor::new()
-        .map_err(|e| anyhow::anyhow!("Failed to create readline editor: {}", e))?;
-
-    println!("IMAP Shell - Enter raw IMAP commands. Type 'quit' to exit.");
-
-    loop {
-        let readline: RustylineResult<String> = rl.readline("IMAP> ");
-        match readline {
-            Ok(line) => {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                if line.eq_ignore_ascii_case("quit") || line.eq_ignore_ascii_case("exit") {
-                    break;
-                }
-
-                // Handle common IMAP commands that are supported by async-imap
-                let command_lower = line.to_lowercase();
-
-                if command_lower.starts_with("select ") {
-                    let mailbox = line[7..].trim();
-                    match session.select(mailbox).await {
-                        Ok(mailbox_info) => {
-                            println!("* {} EXISTS", mailbox_info.exists);
-                            println!("* {} RECENT", mailbox_info.recent);
-                            if let Some(uid_validity) = mailbox_info.uid_validity {
-                                println!("* OK [UIDVALIDITY {}]", uid_validity);
-                            }
-                            println!("* OK [UIDNEXT {}]", mailbox_info.uid_next.unwrap_or(1));
-                            println!("A001 OK [READ-WRITE] SELECT completed");
-                        }
-                        Err(e) => println!("A001 NO {}", e),
-                    }
-                } else if command_lower.starts_with("list ") {
-                    let parts: Vec<&str> = line[5..].split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        let reference = parts[0].trim_matches('"');
-                        let mailbox = parts[1].trim_matches('"');
-                        match session.list(Some(reference), Some(mailbox)).await {
-                            Ok(mailboxes) => {
-                                let mailboxes: Vec<_> =
-                                    mailboxes.try_collect().await.unwrap_or_default();
-                                for mailbox in mailboxes.iter() {
-                                    let attrs: Vec<String> = mailbox
-                                        .attributes()
-                                        .iter()
-                                        .map(|a| format!("{:?}", a))
-                                        .collect();
-                                    println!(
-                                        "* LIST ({}) \"{}\" \"{}\"",
-                                        attrs.join(" "),
-                                        mailbox.delimiter().unwrap_or("/"),
-                                        mailbox.name()
-                                    );
-                                }
-                                println!("A001 OK LIST completed");
-                            }
-                            Err(e) => println!("A001 NO {}", e),
-                        }
-                    } else {
-                        println!("A001 BAD Invalid LIST command syntax");
-                    }
-                } else if command_lower == "capability" {
-                    match session.capabilities().await {
-                        Ok(caps) => {
-                            let cap_strings: Vec<String> =
-                                caps.iter().map(|c| format!("{:?}", c)).collect();
-                            println!("* CAPABILITY {}", cap_strings.join(" "));
-                            println!("A001 OK CAPABILITY completed");
-                        }
-                        Err(e) => println!("A001 NO {}", e),
-                    }
-                } else {
-                    println!("A001 BAD Command not supported in shell mode");
-                    println!("Supported commands: SELECT, LIST, CAPABILITY");
-                }
-            }
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                println!("Interrupted");
-                break;
-            }
-            Err(rustyline::error::ReadlineError::Eof) => {
-                println!("EOF");
-                break;
-            }
-            Err(e) => {
-                println!("Error reading line: {}", e);
-                break;
-            }
-        }
-    }
-
-    session.logout().await?;
-    println!("Goodbye!");
-    Ok(())
 }
 
 /// Establish a TLS connection to the IMAP server and authenticate.

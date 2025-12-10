@@ -2,6 +2,8 @@
 mod config;
 /// IMAP client functionality for email operations.
 mod imap;
+/// Interactive IMAP shell functionality.
+mod shell;
 
 use structopt::StructOpt;
 
@@ -61,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::Shell => {
-            imap::start_shell().await?;
+            shell::start().await?;
         }
     }
 
