@@ -40,7 +40,8 @@
           pname = cargoToml.package.name;
           version = cargoToml.package.version;
           description = cargoToml.package.description;
-          nativeBuildInputs = with pkgs; [ ];
+          nativeBuildInputs = with pkgs; [ pkg-config ];
+          buildInputs = with pkgs; [ bzip2 ];
 
           src = pkgs.lib.cleanSource ./.;
 
