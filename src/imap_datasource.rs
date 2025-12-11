@@ -20,12 +20,12 @@ use datafusion::{
 };
 
 #[derive(Debug)]
-pub struct MyDataSource {
+pub struct ImapDataSource {
     /// The schema for our only table.
     schema: SchemaRef,
 }
 
-impl Default for MyDataSource {
+impl Default for ImapDataSource {
     fn default() -> Self {
         let schema = Schema::new(vec![
             Field::new("name", DataType::Utf8, false),
@@ -39,7 +39,7 @@ impl Default for MyDataSource {
 }
 
 #[async_trait]
-impl TableProvider for MyDataSource {
+impl TableProvider for ImapDataSource {
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
     }
@@ -63,16 +63,16 @@ impl TableProvider for MyDataSource {
         dbg!(filters);
         dbg!(limit);
 
-        Ok(Arc::new(MyExecPlan::new(self.schema.clone())))
+        Ok(Arc::new(ImapExecPlan::new(self.schema.clone())))
     }
 }
 
 #[derive(Debug)]
-struct MyExecPlan {
+struct ImapExecPlan {
     properties: PlanProperties,
 }
 
-impl MyExecPlan {
+impl ImapExecPlan {
     fn new(schema: SchemaRef) -> Self {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(schema),
@@ -85,15 +85,15 @@ impl MyExecPlan {
     }
 }
 
-impl DisplayAs for MyExecPlan {
+impl DisplayAs for ImapExecPlan {
     fn fmt_as(&self, _t: DisplayFormatType, _f: &mut Formatter) -> std::fmt::Result {
         todo!()
     }
 }
 
-impl ExecutionPlan for MyExecPlan {
+impl ExecutionPlan for ImapExecPlan {
     fn name(&self) -> &str {
-        "MyExecPlan"
+        "ImapExecPlan"
     }
 
     fn as_any(&self) -> &dyn Any {

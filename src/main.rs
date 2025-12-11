@@ -3,7 +3,7 @@ mod config;
 /// IMAP client functionality for email operations.
 mod imap;
 /// DataFusion custom data source implementation.
-mod my_data;
+mod imap_datasource;
 /// Interactive IMAP shell functionality.
 mod shell;
 
@@ -13,7 +13,7 @@ use anyhow::Context;
 use datafusion::prelude::SessionContext;
 use structopt::StructOpt;
 
-use crate::my_data::MyDataSource;
+use crate::imap_datasource::ImapDataSource;
 
 /// Command-line interface for the omnitool IMAP email search application.
 #[derive(StructOpt)]
@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::DfTest => {
             let ctx = SessionContext::new();
-            ctx.register_table("mailboxes", Arc::new(MyDataSource::default()))
+            ctx.register_table("mailboxes", Arc::new(ImapDataSource::default()))
                 .context("failed to register mailboxes table")?;
             let df = ctx
                 .sql("SELECT * FROM mailboxes;")
