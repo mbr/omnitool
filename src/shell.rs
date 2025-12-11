@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -252,7 +252,8 @@ fn history_path() -> anyhow::Result<PathBuf> {
 /// Start an interactive IMAP shell for sending raw commands.
 pub async fn start() -> anyhow::Result<()> {
     let config = Config::load()?;
-    let mut session = imap::connect_and_login(&config).await?;
+    let pool = imap::create_pool(Arc::new(config)).await?;
+    let mut session = pool.get().await?;
 
     let mut rl = DefaultEditor::new()
         .map_err(|e| anyhow::anyhow!("Failed to create readline editor: {}", e))?;
