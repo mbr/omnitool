@@ -13,7 +13,7 @@ use anyhow::Context;
 use datafusion::prelude::SessionContext;
 use structopt::StructOpt;
 
-use crate::imap_datasource::ImapMailboxesDataSource;
+use crate::{config::Config, imap_datasource::ImapMailboxesDataSource};
 
 /// Command-line interface for the omnitool IMAP email search application.
 #[derive(StructOpt)]
@@ -37,6 +37,20 @@ enum Command {
     ImapShell,
     /// Start interactive IMAP shell for raw commands
     SqlShell,
+    /// Execute an SQL query on mails
+    ImapSql {
+        /// SQL query to execute.
+        command: String,
+    },
+}
+
+async fn create_context(config: Arc<Config>) -> anyhow::Result<SessionContext> {
+    let pool = Arc::new(imap::create_pool(config).await?);
+
+    let ctx = SessionContext::new();
+    ctx.register_table("mailboxes", Arc::new(ImapMailboxesDataSource::new(pool)))
+        .context("failed to register mailboxes table")?;
+    Ok(ctx)
 }
 
 /// Main entry point for the omnitool IMAP email search application.
@@ -77,11 +91,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::SqlShell => {
             let mut prompt = shells::Prompt::new("imap")?;
-            let pool = Arc::new(imap::create_pool(prompt.config.clone()).await?);
-
-            let ctx = SessionContext::new();
-            ctx.register_table("mailboxes", Arc::new(ImapMailboxesDataSource::new(pool)))
-                .context("failed to register mailboxes table")?;
+            let ctx = create_context(prompt.config.clone()).await?;
 
             println!(
                 "SQL Shell - Enter SQL query. The `mailboxes` table has a list of all mailboxes"
@@ -97,6 +107,12 @@ async fn main() -> anyhow::Result<()> {
                 };
                 df.show().await?;
             }
+        }
+        Command::ImapSql { command: sql } => {
+            let config = Arc::new(Config::load()?);
+            let ctx = create_context(config).await?;
+            let df = ctx.sql(&sql).await?;
+            df.show().await?;
         }
     }
 
