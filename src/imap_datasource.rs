@@ -96,12 +96,12 @@ impl TableProvider for ImapMailboxesDataSource {
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         dbg!(filters);
-        dbg!(limit);
 
         Ok(Arc::new(ImapExecPlan::new(
             self.schema.clone(),
             self.pool.clone(),
             projection.map(ToOwned::to_owned),
+            limit,
         )?))
     }
 }
@@ -111,6 +111,7 @@ struct ImapExecPlan {
     properties: PlanProperties,
     pool: Arc<ImapPool>,
     projected_schema: SchemaRef,
+    limit: Option<usize>,
 }
 
 impl ImapExecPlan {
@@ -118,6 +119,7 @@ impl ImapExecPlan {
         schema: SchemaRef,
         pool: Arc<ImapPool>,
         projection: Option<Vec<usize>>,
+        limit: Option<usize>,
     ) -> datafusion::common::Result<Self> {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(schema.clone()),
@@ -136,19 +138,34 @@ impl ImapExecPlan {
             properties,
             pool,
             projected_schema,
+            limit,
         })
     }
 }
 
 impl DisplayAs for ImapExecPlan {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
+        let limit = match self.limit {
+            Some(limit) => limit.to_string(),
+            None => String::from("None"),
+        };
         match t {
             DisplayFormatType::Default => f.write_str("ImapExecPlan"),
             DisplayFormatType::Verbose => {
-                write!(f, "ImapExecPlan: must_example={}", self.must_examine())
+                write!(
+                    f,
+                    "ImapExecPlan: must_example={} limit={}",
+                    self.must_examine(),
+                    limit
+                )
             }
             DisplayFormatType::TreeRender => {
-                write!(f, "ImapExecPlan\nmust_examine={}", self.must_examine())
+                write!(
+                    f,
+                    "ImapExecPlan\nmust_examine={}\nlimit={}",
+                    self.must_examine(),
+                    limit
+                )
             }
         }
     }
@@ -210,6 +227,7 @@ impl ImapExecPlan {
         let pool = self.pool.clone();
         let projected_schema = self.projected_schema.clone();
         let must_examine = self.must_examine();
+        let limit = self.limit.unwrap_or(usize::MAX);
 
         async move {
             let mut name_col = StringBuilder::new();
@@ -230,7 +248,8 @@ impl ImapExecPlan {
                 .list(None, Some("*"))
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
-                .map_err(|e| DataFusionError::External(Box::new(e)));
+                .map_err(|e| DataFusionError::External(Box::new(e)))
+                .take(limit);
 
             let mut mailbox_names = Vec::new();
             while let Some(name_result) = name_results.next().await {
