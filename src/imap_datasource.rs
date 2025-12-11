@@ -103,7 +103,7 @@ impl TableProvider for ImapMailboxesDataSource {
             self.schema.clone(),
             self.pool.clone(),
             projection.map(ToOwned::to_owned),
-        )))
+        )?))
     }
 }
 
@@ -111,23 +111,33 @@ impl TableProvider for ImapMailboxesDataSource {
 struct ImapExecPlan {
     properties: PlanProperties,
     pool: Arc<ImapPool>,
-    projection: Option<Vec<usize>>,
+    projected_schema: SchemaRef,
 }
 
 impl ImapExecPlan {
-    fn new(schema: SchemaRef, pool: Arc<ImapPool>, projection: Option<Vec<usize>>) -> Self {
+    fn new(
+        schema: SchemaRef,
+        pool: Arc<ImapPool>,
+        projection: Option<Vec<usize>>,
+    ) -> datafusion::common::Result<Self> {
         let properties = PlanProperties::new(
-            EquivalenceProperties::new(schema),
+            EquivalenceProperties::new(schema.clone()),
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
         );
 
-        Self {
+        let projected_schema = if let Some(ref projection) = projection {
+            Arc::new(schema.project(projection)?)
+        } else {
+            schema
+        };
+
+        Ok(Self {
             properties,
             pool,
-            projection,
-        }
+            projected_schema,
+        })
     }
 }
 
@@ -146,12 +156,11 @@ impl DisplayAs for ImapExecPlan {
 }
 
 impl ImapExecPlan {
-    /// Returns whether or not the query must examine mailboxes individually.
+    /// Returns whether the query must examine mailboxes individually.
     fn must_examine(&self) -> bool {
-        self.projection
-            .as_ref()
-            .map(|col_idxs| col_idxs.iter().any(|&col_idx| col_idx > 2))
-            .unwrap_or_default()
+        self.projected_schema.column_with_name("exists").is_some()
+            || self.projected_schema.column_with_name("recent").is_some()
+            || self.projected_schema.column_with_name("unseen").is_some()
     }
 }
 
@@ -186,16 +195,10 @@ impl ExecutionPlan for ImapExecPlan {
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         assert_eq!(partition, 0);
 
-        let projected_schema = if let Some(ref projection) = self.projection {
-            Arc::new(self.schema().project(projection)?)
-        } else {
-            self.schema()
-        };
-
-        let stream = futures::stream::once(self.build_batch(projected_schema.clone()));
+        let stream = futures::stream::once(self.build_batch());
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(
-            projected_schema,
+            self.projected_schema.clone(),
             stream,
         )))
     }
@@ -204,9 +207,10 @@ impl ExecutionPlan for ImapExecPlan {
 impl ImapExecPlan {
     fn build_batch(
         &self,
-        projected_schema: SchemaRef,
     ) -> impl Future<Output = datafusion::common::Result<RecordBatch>> + 'static {
         let pool = self.pool.clone();
+        let projected_schema = self.projected_schema.clone();
+        let must_examine = self.must_examine();
 
         async move {
             let mut name_col = StringBuilder::new();
@@ -249,18 +253,20 @@ impl ImapExecPlan {
             }
             drop(name_results);
 
-            for mailbox_name in mailbox_names {
-                match imap_session.examine(&mailbox_name).await {
-                    Ok(mailbox) => {
-                        exists_col.append_value(mailbox.exists);
-                        recent_col.append_value(mailbox.recent);
-                        unseen_col.append_value(mailbox.unseen.unwrap_or(0));
-                    }
-                    Err(_) => {
-                        // Virtual mailboxes or other errors - append nulls
-                        exists_col.append_null();
-                        recent_col.append_null();
-                        unseen_col.append_null();
+            if must_examine {
+                for mailbox_name in mailbox_names {
+                    match imap_session.examine(&mailbox_name).await {
+                        Ok(mailbox) => {
+                            exists_col.append_value(mailbox.exists);
+                            recent_col.append_value(mailbox.recent);
+                            unseen_col.append_value(mailbox.unseen.unwrap_or(0));
+                        }
+                        Err(_) => {
+                            // Virtual mailboxes or other errors - append nulls
+                            exists_col.append_null();
+                            recent_col.append_null();
+                            unseen_col.append_null();
+                        }
                     }
                 }
             }
