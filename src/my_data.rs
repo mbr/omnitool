@@ -1,6 +1,9 @@
 use std::{any::Any, fmt::Formatter, sync::Arc};
 
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::{
+    array::{RecordBatch, StringBuilder, UInt32Builder},
+    datatypes::{DataType, Field, Schema},
+};
 use async_trait::async_trait;
 use datafusion::{
     arrow::datatypes::SchemaRef,
@@ -12,6 +15,7 @@ use datafusion::{
     physical_plan::{
         DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
         execution_plan::{Boundedness, EmissionType},
+        memory::MemoryStream,
     },
 };
 
@@ -113,9 +117,27 @@ impl ExecutionPlan for MyExecPlan {
 
     fn execute(
         &self,
-        _partition: usize,
+        partition: usize,
         _context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
-        todo!()
+        assert_eq!(partition, 0);
+
+        let mut name_col = StringBuilder::new();
+        let mut count_col = UInt32Builder::new();
+
+        // Insert data:
+        name_col.append_value("INBOX");
+        count_col.append_value(123);
+
+        let record_batch = RecordBatch::try_new(
+            self.schema(),
+            vec![Arc::new(name_col.finish()), Arc::new(count_col.finish())],
+        )?;
+
+        Ok(Box::pin(MemoryStream::try_new(
+            vec![record_batch],
+            self.schema(),
+            None,
+        )?))
     }
 }
