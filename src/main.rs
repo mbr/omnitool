@@ -5,7 +5,7 @@ mod imap;
 /// DataFusion custom data source implementation.
 mod imap_datasource;
 /// Interactive IMAP shell functionality.
-mod shell;
+mod imap_shell;
 
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ enum Command {
         query: String,
     },
     /// Start interactive IMAP shell for raw commands
-    Shell,
+    ImapShell,
     /// Datafusion test
     DfTest,
 }
@@ -72,8 +72,8 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", result);
             }
         }
-        Command::Shell => {
-            shell::start().await?;
+        Command::ImapShell => {
+            imap_shell::start().await?;
         }
         Command::DfTest => {
             let pool = Arc::new(imap::create_pool(Arc::new(config::Config::load()?)).await?);
