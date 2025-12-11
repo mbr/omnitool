@@ -23,6 +23,26 @@ use futures::{StreamExt, TryStreamExt};
 
 use crate::imap::ImapPool;
 
+/// Formats a NameAttribute as a plain string.
+fn format_name_attribute<'a>(attr: &'a async_imap::types::NameAttribute<'a>) -> &'a str {
+    use async_imap::types::NameAttribute;
+    match attr {
+        NameAttribute::NoInferiors => "NoInferiors",
+        NameAttribute::NoSelect => "NoSelect",
+        NameAttribute::Marked => "Marked",
+        NameAttribute::Unmarked => "Unmarked",
+        NameAttribute::All => "All",
+        NameAttribute::Archive => "Archive",
+        NameAttribute::Drafts => "Drafts",
+        NameAttribute::Flagged => "Flagged",
+        NameAttribute::Junk => "Junk",
+        NameAttribute::Sent => "Sent",
+        NameAttribute::Trash => "Trash",
+        NameAttribute::Extension(s) => s.as_ref().strip_prefix('\\').unwrap_or(s.as_ref()),
+        _ => "Unknown",
+    }
+}
+
 /// A datasource for imap mailboxes.
 #[derive(Debug)]
 pub struct ImapMailboxesDataSource {
@@ -181,7 +201,7 @@ impl ExecutionPlan for ImapExecPlan {
                 }
 
                 for attr in name.attributes() {
-                    flags_col.values().append_value(format!("{:?}", attr));
+                    flags_col.values().append_value(format_name_attribute(attr));
                 }
                 flags_col.append(true);
 
