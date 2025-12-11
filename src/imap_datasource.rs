@@ -106,7 +106,6 @@ impl TableProvider for ImapMailboxesDataSource {
         Ok(Arc::new(ImapExecPlan::new(
             projected_schema,
             self.pool.clone(),
-            projection.map(ToOwned::to_owned),
             limit,
         )?))
     }
@@ -124,7 +123,6 @@ impl ImapExecPlan {
     fn new(
         projected_schema: SchemaRef,
         pool: Arc<ImapPool>,
-        projection: Option<Vec<usize>>,
         limit: Option<usize>,
     ) -> datafusion::common::Result<Self> {
         let properties = PlanProperties::new(
@@ -221,6 +219,11 @@ impl ExecutionPlan for ImapExecPlan {
             self.projected_schema.clone(),
             stream,
         )))
+    }
+
+    fn supports_limit_pushdown(&self) -> bool {
+        // Likely has no effect, since there are no inputs to this node.
+        true
     }
 }
 
