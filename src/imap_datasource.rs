@@ -271,20 +271,23 @@ impl ImapExecPlan {
             }
             drop(name_results);
 
-            if must_examine {
-                for mailbox_name in mailbox_names {
-                    match imap_session.examine(&mailbox_name).await {
-                        Ok(mailbox) => {
-                            exists_col.append_value(mailbox.exists);
-                            recent_col.append_value(mailbox.recent);
-                            unseen_col.append_value(mailbox.unseen.unwrap_or(0));
-                        }
-                        Err(_) => {
-                            // Virtual mailboxes or other errors - append nulls
-                            exists_col.append_null();
-                            recent_col.append_null();
-                            unseen_col.append_null();
-                        }
+            for mailbox_name in mailbox_names {
+                let examined = if must_examine {
+                    imap_session.examine(&mailbox_name).await.ok()
+                } else {
+                    None
+                };
+
+                match examined {
+                    Some(mailbox) => {
+                        exists_col.append_value(mailbox.exists);
+                        recent_col.append_value(mailbox.recent);
+                        unseen_col.append_value(mailbox.unseen.unwrap_or(0));
+                    }
+                    None => {
+                        exists_col.append_null();
+                        recent_col.append_null();
+                        unseen_col.append_null();
                     }
                 }
             }
