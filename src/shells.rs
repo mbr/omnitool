@@ -55,7 +55,7 @@ impl Prompt {
     /// Read a line from the user.
     ///
     /// Returns a trimmed line or `None` on EOF.
-    pub async fn read_line(&mut self, prompt_str: &str) -> anyhow::Result<Option<String>> {
+    pub fn read_line(&mut self, prompt_str: &str) -> anyhow::Result<Option<String>> {
         loop {
             let readline = self.editor.readline(prompt_str);
             return match readline {

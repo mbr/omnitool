@@ -241,7 +241,7 @@ pub async fn start() -> anyhow::Result<()> {
 
     println!("IMAP Shell - Enter IMAP commands, or --help for a command list");
 
-    while let Some(line) = prompt.read_line("IMAP> ").await? {
+    while let Some(line) = prompt.read_line("IMAP> ")? {
         // Parse the line into shell arguments
         let args = match shlex::split(&line) {
             Some(args) => args,
