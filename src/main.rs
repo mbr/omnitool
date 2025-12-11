@@ -2,11 +2,18 @@
 mod config;
 /// IMAP client functionality for email operations.
 mod imap;
+/// DataFusion custom data source implementation.
+mod my_data;
 /// Interactive IMAP shell functionality.
 mod shell;
 
+use std::sync::Arc;
+
+use anyhow::Context;
 use datafusion::prelude::SessionContext;
 use structopt::StructOpt;
+
+use crate::my_data::MyDataSource;
 
 /// Command-line interface for the omnitool IMAP email search application.
 #[derive(StructOpt)]
@@ -70,7 +77,12 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::DfTest => {
             let ctx = SessionContext::new();
-            let df = ctx.sql("SELECT 1;").await.expect("query failed");
+            ctx.register_table("mailboxes", Arc::new(MyDataSource {}))
+                .context("failed to register mailboxes table")?;
+            let df = ctx
+                .sql("SELECT * FROM mailboxes;")
+                .await
+                .expect("query failed");
             df.show().await?;
         }
     }

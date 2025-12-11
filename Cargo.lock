@@ -2440,7 +2440,9 @@ name = "omnitool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrow",
  "async-imap",
+ "async-trait",
  "datafusion",
  "directories",
  "futures",
