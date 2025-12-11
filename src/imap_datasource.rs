@@ -36,6 +36,7 @@ impl ImapMailboxesDataSource {
     pub fn new(pool: Arc<ImapPool>) -> Self {
         let schema = Schema::new(vec![
             Field::new("name", DataType::Utf8, false),
+            Field::new("separator", DataType::Utf8, true),
             // RFC 3501 attributes
             Field::new("no_inferiors", DataType::Boolean, false),
             Field::new("no_select", DataType::Boolean, false),
@@ -182,6 +183,7 @@ impl ExecutionPlan for ImapExecPlan {
                 use async_imap::types::NameAttribute;
 
                 let mut name_col = StringBuilder::new();
+                let mut separator_col = StringBuilder::new();
                 // RFC 3501 attributes
                 let mut noinferiors_col = BooleanBuilder::new();
                 let mut noselect_col = BooleanBuilder::new();
@@ -203,6 +205,12 @@ impl ExecutionPlan for ImapExecPlan {
                 let mut remote_col = BooleanBuilder::new();
 
                 name_col.append_value(name.name());
+
+                // Append separator
+                match name.delimiter() {
+                    Some(delim) => separator_col.append_value(delim),
+                    None => separator_col.append_null(),
+                }
 
                 // Process attributes
                 let mut has_noinferiors = false;
@@ -279,6 +287,7 @@ impl ExecutionPlan for ImapExecPlan {
                     schema,
                     vec![
                         Arc::new(name_col.finish()),
+                        Arc::new(separator_col.finish()),
                         Arc::new(noinferiors_col.finish()),
                         Arc::new(noselect_col.finish()),
                         Arc::new(marked_col.finish()),
