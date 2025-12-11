@@ -58,7 +58,7 @@ impl Prompt {
     pub async fn read_line(&mut self, prompt_str: &str) -> anyhow::Result<Option<String>> {
         loop {
             let readline = self.editor.readline(prompt_str);
-            match readline {
+            return match readline {
                 Ok(line) => {
                     let line = line.trim();
                     if line.is_empty() {
@@ -76,18 +76,18 @@ impl Prompt {
                         eprintln!("Warning: Failed to save history: {}", e);
                     }
 
-                    return Ok(Some(line.to_string()));
+                    Ok(Some(line.to_string()))
                 }
                 Err(rustyline::error::ReadlineError::Interrupted)
                 | Err(rustyline::error::ReadlineError::Eof) => {
                     // User wants to exit - return None
-                    return Ok(None);
+                    Ok(None)
                 }
                 Err(e) => {
                     // Actual error
-                    return Err(anyhow::anyhow!("Error reading line: {}", e));
+                    Err(anyhow::anyhow!("Error reading line: {}", e))
                 }
-            }
+            };
         }
     }
 }
