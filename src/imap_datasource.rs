@@ -1,7 +1,7 @@
 use std::{any::Any, fmt::Formatter, sync::Arc};
 
 use arrow::{
-    array::{ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
+    array::{ArrayRef, ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
     datatypes::{DataType, Field, Schema},
 };
 use async_trait::async_trait;
@@ -102,6 +102,7 @@ impl TableProvider for ImapMailboxesDataSource {
         Ok(Arc::new(ImapExecPlan::new(
             self.schema.clone(),
             self.pool.clone(),
+            projection.map(ToOwned::to_owned),
         )))
     }
 }
@@ -110,10 +111,11 @@ impl TableProvider for ImapMailboxesDataSource {
 struct ImapExecPlan {
     properties: PlanProperties,
     pool: Arc<ImapPool>,
+    projection: Option<Vec<usize>>,
 }
 
 impl ImapExecPlan {
-    fn new(schema: SchemaRef, pool: Arc<ImapPool>) -> Self {
+    fn new(schema: SchemaRef, pool: Arc<ImapPool>, projection: Option<Vec<usize>>) -> Self {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(schema),
             Partitioning::UnknownPartitioning(1),
@@ -121,7 +123,11 @@ impl ImapExecPlan {
             Boundedness::Bounded,
         );
 
-        Self { properties, pool }
+        Self {
+            properties,
+            pool,
+            projection,
+        }
     }
 }
 
@@ -129,9 +135,23 @@ impl DisplayAs for ImapExecPlan {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         match t {
             DisplayFormatType::Default => f.write_str("ImapExecPlan"),
-            DisplayFormatType::Verbose => write!(f, "ImapExecPlan: {:?}", self.pool),
-            DisplayFormatType::TreeRender => write!(f, "ImapExecPlan\npool={:?}", self.pool),
+            DisplayFormatType::Verbose => {
+                write!(f, "ImapExecPlan: must_example={}", self.must_examine())
+            }
+            DisplayFormatType::TreeRender => {
+                write!(f, "ImapExecPlan\nmust_examine={}", self.must_examine())
+            }
         }
+    }
+}
+
+impl ImapExecPlan {
+    /// Returns whether or not the query must examine mailboxes individually.
+    fn must_examine(&self) -> bool {
+        self.projection
+            .as_ref()
+            .map(|col_idxs| col_idxs.iter().any(|&col_idx| col_idx > 2))
+            .unwrap_or_default()
     }
 }
 
@@ -166,9 +186,24 @@ impl ExecutionPlan for ImapExecPlan {
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         assert_eq!(partition, 0);
 
+        let stream = futures::stream::once(self.build_batch());
+
+        Ok(Box::pin(RecordBatchStreamAdapter::new(
+            self.schema().clone(),
+            stream,
+        )))
+    }
+}
+
+impl ImapExecPlan {
+    fn build_batch(
+        &self,
+    ) -> impl Future<Output = datafusion::common::Result<RecordBatch>> + 'static {
         let pool = self.pool.clone();
         let schema = self.schema();
-        let stream = futures::stream::once(async move {
+        let projection = self.projection.clone();
+
+        async move {
             let mut name_col = StringBuilder::new();
             let mut separator_col = StringBuilder::new();
             let flags_field = Field::new("flag", DataType::Utf8, false);
@@ -225,24 +260,38 @@ impl ExecutionPlan for ImapExecPlan {
                 }
             }
 
-            let rb = RecordBatch::try_new(
-                schema,
-                vec![
-                    Arc::new(name_col.finish()),
-                    Arc::new(separator_col.finish()),
-                    Arc::new(flags_col.finish()),
-                    Arc::new(exists_col.finish()),
-                    Arc::new(recent_col.finish()),
-                    Arc::new(unseen_col.finish()),
-                ],
-            )?;
+            let name_col = Arc::new(name_col.finish());
+            let separator_col = Arc::new(separator_col.finish());
+            let flags_col = Arc::new(flags_col.finish());
+            let exists_col = Arc::new(exists_col.finish());
+            let recent_col = Arc::new(recent_col.finish());
+            let unseen_col = Arc::new(unseen_col.finish());
+
+            let idxs: Box<dyn Iterator<Item = usize>> = if let Some(ref projection) = projection {
+                Box::new(projection.iter().cloned())
+            } else {
+                Box::new((0..6usize).into_iter())
+            };
+
+            let columns: Vec<ArrayRef> = idxs
+                .map(move |idx| {
+                    let col: ArrayRef = match idx {
+                        0 => name_col.clone(),
+                        1 => separator_col.clone(),
+                        2 => flags_col.clone(),
+                        3 => exists_col.clone(),
+                        4 => recent_col.clone(),
+                        5 => unseen_col.clone(),
+
+                        _ => unreachable!(),
+                    };
+                    col
+                })
+                .collect();
+
+            let rb = RecordBatch::try_new(schema, columns)?;
 
             Ok(rb)
-        });
-
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            self.schema(),
-            stream,
-        )))
+        }
     }
 }
