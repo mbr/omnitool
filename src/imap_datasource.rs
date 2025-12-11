@@ -186,10 +186,16 @@ impl ExecutionPlan for ImapExecPlan {
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         assert_eq!(partition, 0);
 
-        let stream = futures::stream::once(self.build_batch());
+        let projected_schema = if let Some(ref projection) = self.projection {
+            Arc::new(self.schema().project(projection)?)
+        } else {
+            self.schema()
+        };
+
+        let stream = futures::stream::once(self.build_batch(projected_schema.clone()));
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(
-            self.schema().clone(),
+            projected_schema,
             stream,
         )))
     }
@@ -198,10 +204,9 @@ impl ExecutionPlan for ImapExecPlan {
 impl ImapExecPlan {
     fn build_batch(
         &self,
+        projected_schema: SchemaRef,
     ) -> impl Future<Output = datafusion::common::Result<RecordBatch>> + 'static {
         let pool = self.pool.clone();
-        let schema = self.schema();
-        let projection = self.projection.clone();
 
         async move {
             let mut name_col = StringBuilder::new();
@@ -267,29 +272,24 @@ impl ImapExecPlan {
             let recent_col = Arc::new(recent_col.finish());
             let unseen_col = Arc::new(unseen_col.finish());
 
-            let idxs: Box<dyn Iterator<Item = usize>> = if let Some(ref projection) = projection {
-                Box::new(projection.iter().cloned())
-            } else {
-                Box::new((0..6usize).into_iter())
-            };
-
-            let columns: Vec<ArrayRef> = idxs
-                .map(move |idx| {
-                    let col: ArrayRef = match idx {
-                        0 => name_col.clone(),
-                        1 => separator_col.clone(),
-                        2 => flags_col.clone(),
-                        3 => exists_col.clone(),
-                        4 => recent_col.clone(),
-                        5 => unseen_col.clone(),
-
+            let columns: Vec<ArrayRef> = projected_schema
+                .fields
+                .iter()
+                .map(|f| {
+                    let col: ArrayRef = match f.name().as_str() {
+                        "name" => name_col.clone(),
+                        "separator" => separator_col.clone(),
+                        "flags" => flags_col.clone(),
+                        "exists" => exists_col.clone(),
+                        "recent" => recent_col.clone(),
+                        "unseen" => unseen_col.clone(),
                         _ => unreachable!(),
                     };
                     col
                 })
                 .collect();
 
-            let rb = RecordBatch::try_new(schema, columns)?;
+            let rb = RecordBatch::try_new(projected_schema, columns)?;
 
             Ok(rb)
         }
