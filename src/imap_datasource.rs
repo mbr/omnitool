@@ -1,7 +1,7 @@
 use std::{any::Any, fmt::Formatter, sync::Arc};
 
 use arrow::{
-    array::{ListBuilder, RecordBatch, StringBuilder},
+    array::{ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
     datatypes::{DataType, Field, Schema},
 };
 use async_trait::async_trait;
@@ -62,6 +62,9 @@ impl ImapMailboxesDataSource {
                 DataType::List(Arc::new(Field::new("flag", DataType::Utf8, false))),
                 false,
             ),
+            Field::new("exists", DataType::UInt32, true),
+            Field::new("recent", DataType::UInt32, true),
+            Field::new("unseen", DataType::UInt32, true),
         ]);
 
         Self {
@@ -167,6 +170,9 @@ impl ExecutionPlan for ImapExecPlan {
             let flags_field = Field::new("flag", DataType::Utf8, false);
             let mut flags_col =
                 ListBuilder::new(StringBuilder::new()).with_field(flags_field.clone());
+            let mut exists_col = UInt32Builder::new();
+            let mut recent_col = UInt32Builder::new();
+            let mut unseen_col = UInt32Builder::new();
 
             let mut imap_session = pool
                 .get()
@@ -200,11 +206,19 @@ impl ExecutionPlan for ImapExecPlan {
             drop(name_results);
 
             for mailbox_name in mailbox_names {
-                let examine_result = imap_session
-                    .examine(&mailbox_name)
-                    .await
-                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
-                dbg!(examine_result);
+                match imap_session.examine(&mailbox_name).await {
+                    Ok(mailbox) => {
+                        exists_col.append_value(mailbox.exists);
+                        recent_col.append_value(mailbox.recent);
+                        unseen_col.append_value(mailbox.unseen.unwrap_or(0));
+                    }
+                    Err(_) => {
+                        // Virtual mailboxes or other errors - append nulls
+                        exists_col.append_null();
+                        recent_col.append_null();
+                        unseen_col.append_null();
+                    }
+                }
             }
 
             let rb = RecordBatch::try_new(
@@ -213,6 +227,9 @@ impl ExecutionPlan for ImapExecPlan {
                     Arc::new(name_col.finish()),
                     Arc::new(separator_col.finish()),
                     Arc::new(flags_col.finish()),
+                    Arc::new(exists_col.finish()),
+                    Arc::new(recent_col.finish()),
+                    Arc::new(unseen_col.finish()),
                 ],
             )?;
 
