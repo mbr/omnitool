@@ -37,8 +37,7 @@ enum Command {
     ImapShell,
     /// Start interactive IMAP shell for raw commands
     SqlShell,
-    /// Datafusion test
-    DfTest,
+
 }
 
 /// Main entry point for the omnitool IMAP email search application.
@@ -99,18 +98,6 @@ async fn main() -> anyhow::Result<()> {
                 };
                 df.show().await?;
             }
-        }
-        Command::DfTest => {
-            let pool = Arc::new(imap::create_pool(Arc::new(config::Config::load()?)).await?);
-
-            let ctx = SessionContext::new();
-            ctx.register_table("mailboxes", Arc::new(ImapMailboxesDataSource::new(pool)))
-                .context("failed to register mailboxes table")?;
-            let df = ctx
-                .sql("SELECT * FROM mailboxes;")
-                .await
-                .expect("query failed");
-            df.show().await?;
         }
     }
 
