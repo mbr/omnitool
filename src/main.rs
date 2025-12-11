@@ -37,7 +37,6 @@ enum Command {
     ImapShell,
     /// Start interactive IMAP shell for raw commands
     SqlShell,
-
 }
 
 /// Main entry point for the omnitool IMAP email search application.
