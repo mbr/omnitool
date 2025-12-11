@@ -241,45 +241,31 @@ pub async fn start() -> anyhow::Result<()> {
 
     println!("IMAP Shell - Enter IMAP commands, or --help for a command list");
 
-    loop {
-        match prompt.read_line("IMAP> ").await {
-            Ok(Some(line)) => {
-                // Parse the line into shell arguments
-                let args = match shlex::split(&line) {
-                    Some(args) => args,
-                    None => {
-                        println!("Error: Invalid shell syntax");
-                        continue;
-                    }
-                };
-
-                // Add a dummy arg0 for structopt parsing
-                let args_with_arg0 =
-                    std::iter::once("imap_cmd".to_string()).chain(args.into_iter());
-
-                // Parse into command
-                let command = match ImapCommand::from_iter_safe(args_with_arg0) {
-                    Ok(command) => command,
-                    Err(e) => {
-                        println!("Error parsing command: {}", e);
-                        continue;
-                    }
-                };
-
-                // Execute the command
-                if let Err(e) = command.execute(&mut session).await {
-                    println!("Error executing command: {}", e);
-                }
+    while let Some(line) = prompt.read_line("IMAP> ").await? {
+        // Parse the line into shell arguments
+        let args = match shlex::split(&line) {
+            Some(args) => args,
+            None => {
+                println!("Error: Invalid shell syntax");
+                continue;
             }
-            Ok(None) => {
-                // User exited
-                break;
-            }
+        };
+
+        // Add a dummy arg0 for structopt parsing
+        let args_with_arg0 = std::iter::once("imap_cmd".to_string()).chain(args.into_iter());
+
+        // Parse into command
+        let command = match ImapCommand::from_iter_safe(args_with_arg0) {
+            Ok(command) => command,
             Err(e) => {
-                // Actual error
-                println!("Error: {}", e);
-                break;
+                println!("Error parsing command: {}", e);
+                continue;
             }
+        };
+
+        // Execute the command
+        if let Err(e) = command.execute(&mut session).await {
+            println!("Error executing command: {}", e);
         }
     }
 
