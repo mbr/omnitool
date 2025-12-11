@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use anyhow::Context;
 use directories::ProjectDirs;
 use rustyline::DefaultEditor;
-use structopt::StructOpt;
 
 use crate::config::Config;
 
@@ -26,8 +25,6 @@ pub struct Prompt {
     editor: DefaultEditor,
     /// The path to the history file.
     history_file: PathBuf,
-    /// The shell name for display purposes.
-    shell_name: String,
 }
 
 impl Prompt {
@@ -52,20 +49,13 @@ impl Prompt {
             config: std::sync::Arc::new(config),
             editor,
             history_file,
-            shell_name: shell_name.to_string(),
         })
     }
 
-    /// Read and parse a command from the user.
+    /// Read a line from the user.
     ///
-    /// Returns:
-    /// - `Ok(Some(command))` - Successfully parsed command
-    /// - `Ok(None)` - User wants to exit (Ctrl+C/Ctrl+D) or empty input that should retry
-    /// - `Err(...)` - Actual error occurred
-    pub async fn read_command<T>(&mut self, prompt_str: &str) -> anyhow::Result<Option<T>>
-    where
-        T: StructOpt,
-    {
+    /// Returns a trimmed line or `None` on EOF.
+    pub async fn read_line(&mut self, prompt_str: &str) -> anyhow::Result<Option<String>> {
         loop {
             let readline = self.editor.readline(prompt_str);
             match readline {
@@ -86,27 +76,7 @@ impl Prompt {
                         eprintln!("Warning: Failed to save history: {}", e);
                     }
 
-                    let args = match shlex::split(line) {
-                        Some(args) => args,
-                        None => {
-                            println!("Error: Invalid shell syntax");
-                            // Continue prompting on parse error
-                            continue;
-                        }
-                    };
-
-                    // Add a dummy arg0 for structopt parsing
-                    let args_with_arg0 =
-                        std::iter::once(format!("{}_cmd", self.shell_name)).chain(args.into_iter());
-
-                    match T::from_iter_safe(args_with_arg0) {
-                        Ok(command) => return Ok(Some(command)),
-                        Err(e) => {
-                            println!("Error parsing command: {}", e);
-                            // Continue prompting on parse error
-                            continue;
-                        }
-                    }
+                    return Ok(Some(line.to_string()));
                 }
                 Err(rustyline::error::ReadlineError::Interrupted)
                 | Err(rustyline::error::ReadlineError::Eof) => {
