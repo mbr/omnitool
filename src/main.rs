@@ -13,7 +13,7 @@ use anyhow::Context;
 use datafusion::prelude::SessionContext;
 use structopt::StructOpt;
 
-use crate::imap_datasource::ImapDataSource;
+use crate::imap_datasource::ImapMailboxesDataSource;
 
 /// Command-line interface for the omnitool IMAP email search application.
 #[derive(StructOpt)]
@@ -76,8 +76,10 @@ async fn main() -> anyhow::Result<()> {
             shell::start().await?;
         }
         Command::DfTest => {
+            let pool = Arc::new(imap::create_pool(Arc::new(config::Config::load()?)).await?);
+
             let ctx = SessionContext::new();
-            ctx.register_table("mailboxes", Arc::new(ImapDataSource::default()))
+            ctx.register_table("mailboxes", Arc::new(ImapMailboxesDataSource::new(pool)))
                 .context("failed to register mailboxes table")?;
             let df = ctx
                 .sql("SELECT * FROM mailboxes;")

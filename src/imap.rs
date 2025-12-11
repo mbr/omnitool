@@ -15,6 +15,8 @@ use crate::config::Config;
 type ImapStream = tokio_util::compat::Compat<TlsStream<TcpStream>>;
 /// Type alias for an active IMAP session over a TLS connection.
 pub type ImapSession = async_imap::Session<ImapStream>;
+/// A logged-in IMAP connection pool.
+pub type ImapPool = Pool<ImapConMan>;
 
 /// Test IMAP login with the provided configuration.
 pub async fn test_login(config: &Config) -> anyhow::Result<()> {
@@ -99,7 +101,7 @@ impl ManageConnection for ImapConMan {
 }
 
 /// Creates a new connection pool from a given configuration.
-pub async fn create_pool(config: Arc<Config>) -> Result<Pool<ImapConMan>, ImapError> {
+pub async fn create_pool(config: Arc<Config>) -> Result<ImapPool, ImapError> {
     Pool::builder().build(ImapConMan { config }).await
 }
 
