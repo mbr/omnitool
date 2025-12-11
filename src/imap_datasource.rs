@@ -121,18 +121,18 @@ impl ImapExecPlan {
         projection: Option<Vec<usize>>,
         limit: Option<usize>,
     ) -> datafusion::common::Result<Self> {
-        let properties = PlanProperties::new(
-            EquivalenceProperties::new(schema.clone()),
-            Partitioning::UnknownPartitioning(1),
-            EmissionType::Incremental,
-            Boundedness::Bounded,
-        );
-
         let projected_schema = if let Some(ref projection) = projection {
             Arc::new(schema.project(projection)?)
         } else {
             schema
         };
+
+        let properties = PlanProperties::new(
+            EquivalenceProperties::new(projected_schema.clone()),
+            Partitioning::UnknownPartitioning(1),
+            EmissionType::Incremental,
+            Boundedness::Bounded,
+        );
 
         Ok(Self {
             properties,
@@ -187,6 +187,10 @@ impl ExecutionPlan for ImapExecPlan {
 
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.projected_schema.clone()
     }
 
     fn properties(&self) -> &PlanProperties {
