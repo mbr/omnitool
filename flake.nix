@@ -41,7 +41,7 @@
           version = cargoToml.package.version;
           description = cargoToml.package.description;
           nativeBuildInputs = with pkgs; [ pkg-config ];
-          buildInputs = with pkgs; [ bzip2 ];
+          buildInputs = with pkgs; [ bzip2 libiconv ];
 
           src = pkgs.lib.cleanSource ./.;
 
