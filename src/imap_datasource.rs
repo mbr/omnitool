@@ -97,8 +97,14 @@ impl TableProvider for ImapMailboxesDataSource {
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         dbg!(filters);
 
+        let projected_schema = if let Some(ref projection) = projection {
+            Arc::new(self.schema().project(projection)?)
+        } else {
+            self.schema()
+        };
+
         Ok(Arc::new(ImapExecPlan::new(
-            self.schema.clone(),
+            projected_schema,
             self.pool.clone(),
             projection.map(ToOwned::to_owned),
             limit,
@@ -116,17 +122,11 @@ struct ImapExecPlan {
 
 impl ImapExecPlan {
     fn new(
-        schema: SchemaRef,
+        projected_schema: SchemaRef,
         pool: Arc<ImapPool>,
         projection: Option<Vec<usize>>,
         limit: Option<usize>,
     ) -> datafusion::common::Result<Self> {
-        let projected_schema = if let Some(ref projection) = projection {
-            Arc::new(schema.project(projection)?)
-        } else {
-            schema
-        };
-
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema.clone()),
             Partitioning::UnknownPartitioning(1),
