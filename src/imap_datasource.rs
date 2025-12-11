@@ -158,13 +158,14 @@ impl ExecutionPlan for ImapExecPlan {
         .try_flatten();
 
         let self_schema = self.schema();
-        let stream = name_stream.and_then(move |_name| {
+        let stream = name_stream.and_then(move |name| {
             let schema = self_schema.clone();
             async move {
                 let mut name_col = StringBuilder::new();
                 let mut count_col = UInt32Builder::new();
 
-                name_col.append_value("INBOX");
+                dbg!(&name);
+                name_col.append_value(name.name());
                 count_col.append_value(123);
 
                 let record_batch = RecordBatch::try_new(
