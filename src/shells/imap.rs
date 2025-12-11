@@ -1,12 +1,7 @@
-use std::{path::PathBuf, sync::Arc};
-
-use anyhow::Context;
-use directories::ProjectDirs;
 use futures::TryStreamExt;
-use rustyline::{DefaultEditor, Result as RustylineResult};
 use structopt::StructOpt;
 
-use crate::{config::Config, imap};
+use crate::imap;
 
 /// Type alias for an active IMAP session over a TLS connection.
 type ImapSession = imap::ImapSession;
@@ -206,112 +201,60 @@ impl ImapCommand {
                 println!("NOOP completed");
             }
             ImapCommand::Search { criteria } => {
-                let uids = session.search(&criteria).await?;
-                println!("Search results: {:?}", uids);
+                let messages = session.search(&criteria).await?;
+                println!("Search results: {:?}", messages);
             }
             ImapCommand::Select { mailbox } => {
                 let info = session.select(&mailbox).await?;
                 print_mailbox_info("Selected", &mailbox, &info);
             }
             ImapCommand::SelectCondstore { mailbox } => {
-                // Note: select_condstore might not be available in async-imap
-                println!("SELECT_CONDSTORE not implemented, using regular SELECT");
-                let info = session.select(&mailbox).await?;
-                print_mailbox_info("Selected", &mailbox, &info);
+                let info = session.select_condstore(&mailbox).await?;
+                print_mailbox_info("Selected (CONDSTORE)", &mailbox, &info);
             }
             ImapCommand::Status { mailbox, items } => {
-                let status = session.status(&mailbox, &items).await?;
-                println!("Status for {}: {:?}", mailbox, status);
+                let response = session.status(&mailbox, &items).await?;
+                println!("Status for {}: {:?}", mailbox, response);
             }
             ImapCommand::Subscribe { mailbox } => {
                 session.subscribe(&mailbox).await?;
-                println!("Subscribed to: {}", mailbox);
+                println!("Subscribed to {}", mailbox);
             }
             ImapCommand::UidSearch { criteria } => {
-                let uids = session.uid_search(&criteria).await?;
-                println!("UID search results: {:?}", uids);
+                let messages = session.uid_search(&criteria).await?;
+                println!("UID search results: {:?}", messages);
             }
             ImapCommand::Unsubscribe { mailbox } => {
                 session.unsubscribe(&mailbox).await?;
-                println!("Unsubscribed from: {}", mailbox);
+                println!("Unsubscribed from {}", mailbox);
             }
         }
         Ok(())
     }
 }
 
-/// Get the path to the history file.
-fn history_path() -> anyhow::Result<PathBuf> {
-    let proj_dirs =
-        ProjectDirs::from("", "", "omnitool").context("Failed to get project directories")?;
-    let config_dir = proj_dirs.config_dir();
-    std::fs::create_dir_all(config_dir).context("Failed to create config directory")?;
-    Ok(config_dir.join("history.txt"))
-}
-
 /// Start an interactive IMAP shell for sending raw commands.
 pub async fn start() -> anyhow::Result<()> {
-    let config = Config::load()?;
-    let pool = imap::create_pool(Arc::new(config)).await?;
+    let mut prompt = crate::shells::Prompt::new("imap")?;
+    let pool = imap::create_pool(prompt.config.clone()).await?;
     let mut session = pool.get().await?;
-
-    let mut rl = DefaultEditor::new()
-        .map_err(|e| anyhow::anyhow!("Failed to create readline editor: {}", e))?;
-
-    // Load history
-    let history_file = history_path()?;
-    if history_file.exists() {
-        if let Err(e) = rl.load_history(&history_file) {
-            eprintln!("Warning: Failed to load history: {}", e);
-        }
-    }
 
     println!("IMAP Shell - Enter IMAP commands, or --help for a command list");
 
     loop {
-        let readline: RustylineResult<String> = rl.readline("IMAP> ");
-        match readline {
-            Ok(line) => {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-
-                // Add line to history
-                rl.add_history_entry(line)
-                    .map_err(|e| anyhow::anyhow!("Failed to add history entry: {}", e))?;
-
-                // Save history after each command
-                if let Err(e) = rl.save_history(&history_file) {
-                    eprintln!("Warning: Failed to save history: {}", e);
-                }
-
-                let args = match shlex::split(line) {
-                    Some(args) => args,
-                    None => {
-                        println!("Error: Invalid shell syntax");
-                        continue;
-                    }
-                };
-                let args_with_arg0 = std::iter::once("imapcmd".to_string()).chain(args.into_iter());
-
-                match ImapCommand::from_iter_safe(args_with_arg0) {
-                    Ok(command) => {
-                        if let Err(e) = command.execute(&mut session).await {
-                            println!("Error executing command: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        println!("Error parsing command: {}", e);
-                    }
+        match prompt.read_command::<ImapCommand>("IMAP> ").await {
+            Ok(Some(command)) => {
+                if let Err(e) = command.execute(&mut session).await {
+                    println!("Error executing command: {}", e);
                 }
             }
-            Err(rustyline::error::ReadlineError::Interrupted)
-            | Err(rustyline::error::ReadlineError::Eof) => {
+            Ok(None) => {
+                // User exited
                 break;
             }
             Err(e) => {
-                println!("Error reading line: {}", e);
+                // Actual error
+                println!("Error: {}", e);
                 break;
             }
         }
