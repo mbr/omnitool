@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::DfTest => {
             let ctx = SessionContext::new();
-            ctx.register_table("mailboxes", Arc::new(MyDataSource {}))
+            ctx.register_table("mailboxes", Arc::new(MyDataSource::default()))
                 .context("failed to register mailboxes table")?;
             let df = ctx
                 .sql("SELECT * FROM mailboxes;")

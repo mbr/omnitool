@@ -16,7 +16,23 @@ use datafusion::{
 };
 
 #[derive(Debug)]
-pub struct MyDataSource;
+pub struct MyDataSource {
+    /// The schema for our only table.
+    schema: SchemaRef,
+}
+
+impl Default for MyDataSource {
+    fn default() -> Self {
+        let schema = Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("count", DataType::UInt32, false),
+        ]);
+
+        Self {
+            schema: Arc::new(schema),
+        }
+    }
+}
 
 #[async_trait]
 impl TableProvider for MyDataSource {
@@ -25,15 +41,11 @@ impl TableProvider for MyDataSource {
     }
 
     fn schema(&self) -> SchemaRef {
-        let schema = Schema::new(vec![
-            Field::new("name", DataType::Utf8, false),
-            Field::new("count", DataType::UInt32, false),
-        ]);
-        SchemaRef::new(schema)
+        self.schema.clone()
     }
 
     fn table_type(&self) -> TableType {
-        TableType::Base
+        TableType::View
     }
 
     async fn scan(
@@ -47,7 +59,7 @@ impl TableProvider for MyDataSource {
         dbg!(filters);
         dbg!(limit);
 
-        Ok(Arc::new(MyExecPlan::default()))
+        Ok(Arc::new(MyExecPlan::new(self.schema.clone())))
     }
 }
 
@@ -56,18 +68,13 @@ struct MyExecPlan {
     properties: PlanProperties,
 }
 
-impl Default for MyExecPlan {
-    fn default() -> Self {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("name", DataType::Utf8, false),
-            Field::new("count", DataType::UInt32, false),
-        ]));
-
+impl MyExecPlan {
+    fn new(schema: SchemaRef) -> Self {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(schema),
-            Partitioning::UnknownPartitioning(1), // Single partition
+            Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
-            Boundedness::Bounded, // Or Unbounded depending on your data source
+            Boundedness::Bounded,
         );
 
         Self { properties }
