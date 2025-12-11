@@ -95,7 +95,6 @@ impl TableProvider for ImapMailboxesDataSource {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        dbg!(projection);
         dbg!(filters);
         dbg!(limit);
 
