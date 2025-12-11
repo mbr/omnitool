@@ -11,7 +11,7 @@ use datafusion::{
     datasource::{TableProvider, TableType},
     error::DataFusionError,
     execution::{SendableRecordBatchStream, TaskContext},
-    logical_expr::Expr,
+    logical_expr::{Expr, TableProviderFilterPushDown},
     physical_expr::EquivalenceProperties,
     physical_plan::{
         DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
@@ -108,6 +108,30 @@ impl TableProvider for ImapMailboxesDataSource {
             self.pool.clone(),
             limit,
         )?))
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> datafusion::common::Result<Vec<TableProviderFilterPushDown>> {
+        dbg!(filters);
+        Ok(filters
+            .into_iter()
+            .map(|expr| match expr {
+                Expr::Like(like) => {
+                    if let Expr::Column(col) = like.expr.as_ref()
+                        && col.name() == "name"
+                    {
+                        if matches!(like.pattern.as_ref(), Expr::Literal(_, _)) {
+                            return TableProviderFilterPushDown::Exact;
+                        }
+                    }
+
+                    TableProviderFilterPushDown::Unsupported
+                }
+                _ => TableProviderFilterPushDown::Unsupported,
+            })
+            .collect())
     }
 }
 
