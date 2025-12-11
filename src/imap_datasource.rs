@@ -179,6 +179,7 @@ impl ExecutionPlan for ImapExecPlan {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
                 .map_err(|e| DataFusionError::External(Box::new(e)));
 
+            let mut mailbox_names = Vec::new();
             while let Some(name_result) = name_results.next().await {
                 let name = name_result?;
 
@@ -193,6 +194,17 @@ impl ExecutionPlan for ImapExecPlan {
                     flags_col.values().append_value(format_name_attribute(attr));
                 }
                 flags_col.append(true);
+
+                mailbox_names.push(name.name().to_owned());
+            }
+            drop(name_results);
+
+            for mailbox_name in mailbox_names {
+                let examine_result = imap_session
+                    .examine(&mailbox_name)
+                    .await
+                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
+                dbg!(examine_result);
             }
 
             let rb = RecordBatch::try_new(
