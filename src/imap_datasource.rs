@@ -160,41 +160,30 @@ impl ExecutionPlan for ImapExecPlan {
         assert_eq!(partition, 0);
 
         let pool = self.pool.clone();
-        let name_stream = futures::stream::once(async move {
+        let schema = self.schema();
+        let stream = futures::stream::once(async move {
+            let mut name_col = StringBuilder::new();
+            let mut separator_col = StringBuilder::new();
+            let flags_field = Field::new("flag", DataType::Utf8, false);
+            let mut flags_col =
+                ListBuilder::new(StringBuilder::new()).with_field(flags_field.clone());
+
             let mut imap_session = pool
                 .get()
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
-            // let mut imap_session = df_get_imap_session(pool).await?;
 
-            // Sadly we have to buffer them all here, since `.list` takes self by reference.
-            let name_results: Vec<_> = imap_session
+            let mut name_results = imap_session
                 .list(None, Some("*"))
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
-                .map_err(|e| DataFusionError::External(Box::new(e)))
-                .collect()
-                .await;
+                .map_err(|e| DataFusionError::External(Box::new(e)));
 
-            drop(imap_session);
-
-            Result::<_, DataFusionError>::Ok(futures::stream::iter(name_results))
-        })
-        .try_flatten();
-
-        let self_schema = self.schema();
-        let stream = name_stream.and_then(move |name| {
-            let schema = self_schema.clone();
-            async move {
-                let mut name_col = StringBuilder::new();
-                let mut separator_col = StringBuilder::new();
-                let flags_field = Field::new("flag", DataType::Utf8, false);
-                let mut flags_col =
-                    ListBuilder::new(StringBuilder::new()).with_field(flags_field.clone());
+            while let Some(name_result) = name_results.next().await {
+                let name = name_result?;
 
                 name_col.append_value(name.name());
 
-                // Append separator
                 match name.delimiter() {
                     Some(delim) => separator_col.append_value(delim),
                     None => separator_col.append_null(),
@@ -204,19 +193,18 @@ impl ExecutionPlan for ImapExecPlan {
                     flags_col.values().append_value(format_name_attribute(attr));
                 }
                 flags_col.append(true);
-
-                let record_batch = RecordBatch::try_new(
-                    schema,
-                    vec![
-                        Arc::new(name_col.finish()),
-                        Arc::new(separator_col.finish()),
-                        Arc::new(flags_col.finish()),
-                    ],
-                )
-                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-
-                Result::<_, DataFusionError>::Ok(record_batch)
             }
+
+            let rb = RecordBatch::try_new(
+                schema,
+                vec![
+                    Arc::new(name_col.finish()),
+                    Arc::new(separator_col.finish()),
+                    Arc::new(flags_col.finish()),
+                ],
+            )?;
+
+            Ok(rb)
         });
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(
