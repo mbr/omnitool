@@ -4,7 +4,6 @@ use arrow::{
     array::{RecordBatch, StringBuilder, UInt32Builder},
     datatypes::{DataType, Field, Schema},
 };
-use async_imap::types::Name;
 use async_trait::async_trait;
 use bb8::PooledConnection;
 use datafusion::{
@@ -18,13 +17,12 @@ use datafusion::{
     physical_plan::{
         DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
         execution_plan::{Boundedness, EmissionType},
-        memory::MemoryStream,
         stream::RecordBatchStreamAdapter,
     },
 };
-use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 
-use crate::imap::{ImapConMan, ImapPool, ImapSession};
+use crate::imap::{ImapConMan, ImapPool};
 
 /// A datasource for imap mailboxes.
 #[derive(Debug)]
@@ -130,49 +128,34 @@ impl ExecutionPlan for ImapExecPlan {
         Ok(self)
     }
 
-    //
-    // let pool = self.pool.clone();
-    // let connect_and_query = futures::stream::once(async move {
-    //     let mut imap_session = pool
-    //         .get()
-    //         .await
-    //         .map_err(|e| DataFusionError::External(Box::new(e)))?;
-    //
-    //     // Sadly we have to buffer them all here.
-    //     let name_results: Vec<_> = imap_session
-    //         .list(None, Some("*"))
-    //         .await
-    //         .map_err(|e| DataFusionError::External(Box::new(e)))?
-    //         .collect()
-    //         .await;
-    //
-    //     Ok(futures::stream::iter(name_results))
-    // })
-    // .try_flatten();
-
     fn execute(
         &self,
         partition: usize,
         _context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         assert_eq!(partition, 0);
+        let pool = self.pool.clone();
+        let name_stream = futures::stream::once(async move {
+            let mut imap_session = pool
+                .get_owned()
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            // let mut imap_session = df_get_imap_session(pool).await?;
 
-        // `name_stream` is a future that returns a Result<impl Stream, DataFusionError>
-        let names_fut =
-            df_get_imap_session(self.pool.clone()).and_then(|mut imap_session| async move {
-                let name_stream = imap_session
-                    .list(None, Some("*"))
-                    .await
-                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            // Sadly we have to buffer them all here, since `.list` takes self by reference.
+            let name_results: Vec<_> = imap_session
+                .list(None, Some("*"))
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?
+                .map_err(|e| DataFusionError::External(Box::new(e)))
+                .collect()
+                .await;
 
-                let name_stream_df_error =
-                    name_stream.map_err(|e| DataFusionError::External(Box::new(e)));
+            drop(imap_session);
 
-                Ok(name_stream_df_error)
-            });
-
-        // Turn into nested streams using once, then flatten.
-        let name_stream = TryStreamExt::try_flatten(futures::stream::once(names_fut));
+            Result::<_, DataFusionError>::Ok(futures::stream::iter(name_results))
+        })
+        .try_flatten();
 
         let stream = name_stream.and_then(|_name| async {
             let mut name_col = StringBuilder::new();
@@ -184,9 +167,10 @@ impl ExecutionPlan for ImapExecPlan {
             let record_batch = RecordBatch::try_new(
                 self.schema(),
                 vec![Arc::new(name_col.finish()), Arc::new(count_col.finish())],
-            )?;
+            )
+            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
-            Ok(record_batch)
+            Result::<_, DataFusionError>::Ok(record_batch)
         });
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(
