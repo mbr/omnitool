@@ -78,8 +78,27 @@ async fn main() -> anyhow::Result<()> {
             shells::imap::start().await?;
         }
         Command::SqlShell => {
-            // TODO: implement SQL shell
-            println!("SQL Shell not yet implemented");
+            let mut prompt = shells::Prompt::new("imap")?;
+            let pool = Arc::new(imap::create_pool(prompt.config.clone()).await?);
+
+            let ctx = SessionContext::new();
+            ctx.register_table("mailboxes", Arc::new(ImapMailboxesDataSource::new(pool)))
+                .context("failed to register mailboxes table")?;
+
+            println!(
+                "SQL Shell - Enter SQL query. The `mailboxes` table has a list of all mailboxes"
+            );
+
+            while let Some(sql) = prompt.read_line("SQL> ")? {
+                let df = match ctx.sql(&sql).await {
+                    Ok(df) => df,
+                    Err(err) => {
+                        eprintln!("err: {}", err);
+                        continue;
+                    }
+                };
+                df.show().await?;
+            }
         }
         Command::DfTest => {
             let pool = Arc::new(imap::create_pool(Arc::new(config::Config::load()?)).await?);
