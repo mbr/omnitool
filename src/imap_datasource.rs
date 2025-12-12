@@ -344,7 +344,7 @@ impl ImapExecPlan {
         let pool = self.pool.clone();
         let projected_schema = self.projected_schema.clone();
         let must_examine = self.must_examine();
-        let limit = self.limit.unwrap_or(usize::MAX);
+        let mut limit = self.limit.unwrap_or(usize::MAX);
         let source_level_filters = self.source_level_filters.clone();
 
         async move {
@@ -366,18 +366,25 @@ impl ImapExecPlan {
                 .list(None, Some("*"))
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
-                .map_err(|e| DataFusionError::External(Box::new(e)))
-                .take(limit);
+                .map_err(|e| DataFusionError::External(Box::new(e)));
 
             let mut mailbox_names = Vec::new();
             while let Some(name_result) = name_results.next().await {
                 let name = name_result?;
-
+                let mut should_skip = false;
                 for filter in source_level_filters.iter() {
                     if !filter.matches_name_column(name.name())? {
-                        continue;
+                        should_skip = true;
                     }
                 }
+                if should_skip {
+                    continue;
+                }
+
+                if limit == 0 {
+                    break;
+                }
+                limit -= 1;
 
                 name_col.append_value(name.name());
 
