@@ -2,7 +2,7 @@ use std::{any::Any, fmt::Formatter, sync::Arc};
 
 use arrow::{
     array::{ArrayRef, ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
-    datatypes::{DataType, Field, Schema},
+    datatypes::{DataType, DataType::Utf8, Field, Schema},
 };
 use async_trait::async_trait;
 use datafusion::{
@@ -95,7 +95,12 @@ impl TableProvider for ImapMailboxesDataSource {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        dbg!(filters);
+        let mut source_level_filters = Vec::with_capacity(filters.len());
+        for expr in filters {
+            source_level_filters.push(SourceLevelFilter::try_from_expr(expr).ok_or_else(|| {
+                DataFusionError::Internal(format!("unexpected filter pushdown of {}", expr))
+            })?)
+        }
 
         let projected_schema = if let Some(ref projection) = projection {
             Arc::new(self.schema().project(projection)?)
@@ -107,6 +112,7 @@ impl TableProvider for ImapMailboxesDataSource {
             projected_schema,
             self.pool.clone(),
             limit,
+            Arc::from(source_level_filters.into_boxed_slice()),
         )?))
     }
 
@@ -114,25 +120,78 @@ impl TableProvider for ImapMailboxesDataSource {
         &self,
         filters: &[&Expr],
     ) -> datafusion::common::Result<Vec<TableProviderFilterPushDown>> {
-        dbg!(filters);
         Ok(filters
             .into_iter()
-            .map(|expr| match expr {
-                Expr::Like(like) => {
-                    if let Expr::Column(col) = like.expr.as_ref()
-                        && col.name() == "name"
-                    {
-                        if matches!(like.pattern.as_ref(), Expr::Literal(_, _)) {
-                            return TableProviderFilterPushDown::Exact;
-                        }
-                    }
-
-                    TableProviderFilterPushDown::Unsupported
-                }
-                _ => TableProviderFilterPushDown::Unsupported,
+            .map(|expr| {
+                SourceLevelFilter::try_from_expr(expr)
+                    .map(|slf| slf.push_down_kind())
+                    .unwrap_or(TableProviderFilterPushDown::Unsupported)
             })
             .collect())
     }
+}
+
+/// Filters at the source level.
+///
+/// Source level filters are expressed in the query or directly applied after loading.
+#[derive(Debug)]
+enum SourceLevelFilter {
+    /// A `name LIKE` or `name ILIKE` condition.
+    NameLike(String),
+}
+
+impl SourceLevelFilter {
+    /// Tries to create a new [`SourceLevelFilter`] from a given [`Expr`].
+    ///
+    /// Returns `None` if the specific expression is not supported.
+    fn try_from_expr(expr: &Expr) -> Option<SourceLevelFilter> {
+        match expr {
+            Expr::Like(like) => {
+                if let Expr::Column(col) = like.expr.as_ref()
+                    && col.name() == "name"
+                {
+                    if let Expr::Literal(scalar, _) = like.pattern.as_ref() {
+                        if let Some(Some(val)) = scalar.try_as_str() {
+                            return Some(SourceLevelFilter::NameLike(val.to_owned()));
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the type of filter push down supported by this filter.
+    ///
+    /// Used to communicate whether DataFusion will have to re-apply filtering later on.
+    fn push_down_kind(&self) -> TableProviderFilterPushDown {
+        match self {
+            SourceLevelFilter::NameLike(_) => TableProviderFilterPushDown::Exact,
+        }
+    }
+
+    /// Applies the source level filter to a given name.
+    ///
+    /// Returns `true` if the filter either matches or was not applied.
+    fn matches_name_column(&self, name: &str) -> datafusion::common::Result<bool> {
+        match self {
+            SourceLevelFilter::NameLike(pattern) => Ok(like_match(name, pattern)?),
+        }
+    }
+}
+
+/// Applies SQL LIKE pattern matching between a value and a pattern.
+///
+/// Returns true if the value matches the pattern, false otherwise.
+pub fn like_match(value: &str, pattern: &str) -> Result<bool, arrow::error::ArrowError> {
+    let value_array = arrow::array::StringArray::from(vec![value]);
+    let pattern_array = arrow::array::StringArray::from(vec![pattern]);
+
+    let result: arrow::array::BooleanArray =
+        arrow::compute::kernels::comparison::like(&value_array, &pattern_array)?;
+
+    Ok(result.value(0))
 }
 
 #[derive(Debug)]
@@ -141,6 +200,7 @@ struct ImapExecPlan {
     pool: Arc<ImapPool>,
     projected_schema: SchemaRef,
     limit: Option<usize>,
+    source_level_filters: Arc<[SourceLevelFilter]>,
 }
 
 impl ImapExecPlan {
@@ -148,6 +208,7 @@ impl ImapExecPlan {
         projected_schema: SchemaRef,
         pool: Arc<ImapPool>,
         limit: Option<usize>,
+        source_level_filters: Arc<[SourceLevelFilter]>,
     ) -> datafusion::common::Result<Self> {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema.clone()),
@@ -161,6 +222,7 @@ impl ImapExecPlan {
             pool,
             projected_schema,
             limit,
+            source_level_filters,
         })
     }
 }
@@ -259,6 +321,7 @@ impl ImapExecPlan {
         let projected_schema = self.projected_schema.clone();
         let must_examine = self.must_examine();
         let limit = self.limit.unwrap_or(usize::MAX);
+        let source_level_filters = self.source_level_filters.clone();
 
         async move {
             let mut name_col = StringBuilder::new();
@@ -285,6 +348,12 @@ impl ImapExecPlan {
             let mut mailbox_names = Vec::new();
             while let Some(name_result) = name_results.next().await {
                 let name = name_result?;
+
+                for filter in source_level_filters.iter() {
+                    if !filter.matches_name_column(name.name())? {
+                        continue;
+                    }
+                }
 
                 name_col.append_value(name.name());
 
