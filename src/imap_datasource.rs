@@ -1,8 +1,12 @@
-use std::{any::Any, fmt::Formatter, sync::Arc};
+use std::{
+    any::Any,
+    fmt::{Display, Formatter},
+    sync::Arc,
+};
 
 use arrow::{
     array::{ArrayRef, ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
-    datatypes::{DataType, DataType::Utf8, Field, Schema},
+    datatypes::{DataType, Field, Schema},
 };
 use async_trait::async_trait;
 use datafusion::{
@@ -140,6 +144,14 @@ enum SourceLevelFilter {
     NameLike(String),
 }
 
+impl Display for SourceLevelFilter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceLevelFilter::NameLike(pattern) => write!(f, "name LIKE {}", pattern),
+        }
+    }
+}
+
 impl SourceLevelFilter {
     /// Tries to create a new [`SourceLevelFilter`] from a given [`Expr`].
     ///
@@ -238,10 +250,18 @@ impl DisplayAs for ImapExecPlan {
             DisplayFormatType::Verbose => {
                 write!(
                     f,
-                    "ImapExecPlan: must_example={} limit={}",
+                    "ImapExecPlan: must_example={} limit={} [",
                     self.must_examine(),
                     limit
-                )
+                )?;
+                for (idx, filter) in self.source_level_filters.iter().enumerate() {
+                    if idx != 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}", filter)?;
+                }
+                f.write_str("]")?;
+                Ok(())
             }
             DisplayFormatType::TreeRender => {
                 write!(
@@ -249,7 +269,11 @@ impl DisplayAs for ImapExecPlan {
                     "ImapExecPlan\nmust_examine={}\nlimit={}",
                     self.must_examine(),
                     limit
-                )
+                )?;
+                for filter in self.source_level_filters.iter() {
+                    write!(f, "\n{}", filter)?;
+                }
+                Ok(())
             }
         }
     }
