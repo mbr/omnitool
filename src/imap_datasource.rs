@@ -146,6 +146,8 @@ enum SourceLevelFilter {
         case_insensitive: bool,
         pattern: String,
     },
+    /// A `name = 'value'` or `name != 'value'` condition.
+    NameEqual { negated: bool, value: String },
 }
 
 impl Display for SourceLevelFilter {
@@ -162,6 +164,10 @@ impl Display for SourceLevelFilter {
                 } else {
                     write!(f, "name {}LIKE {}", not_str, pattern)
                 }
+            }
+            SourceLevelFilter::NameEqual { negated, value } => {
+                let op = if *negated { "!=" } else { "=" };
+                write!(f, "name {} '{}'", op, value)
             }
         }
     }
@@ -194,6 +200,32 @@ impl SourceLevelFilter {
                 }
                 None
             }
+            Expr::BinaryExpr(binary_expr) => {
+                use datafusion::logical_expr::Operator;
+
+                // Check if it's an equality or inequality operator
+                let negated = match binary_expr.op {
+                    Operator::Eq => false,
+                    Operator::NotEq => true,
+                    _ => return None,
+                };
+
+                // Check if left side is the name column
+                if let Expr::Column(col) = binary_expr.left.as_ref()
+                    && col.name() == "name"
+                {
+                    // Check if right side is a literal string
+                    if let Expr::Literal(scalar, _) = binary_expr.right.as_ref() {
+                        if let Some(Some(val)) = scalar.try_as_str() {
+                            return Some(SourceLevelFilter::NameEqual {
+                                negated,
+                                value: val.to_owned(),
+                            });
+                        }
+                    }
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -204,6 +236,7 @@ impl SourceLevelFilter {
     fn push_down_kind(&self) -> TableProviderFilterPushDown {
         match self {
             SourceLevelFilter::NameLike { .. } => TableProviderFilterPushDown::Exact,
+            SourceLevelFilter::NameEqual { .. } => TableProviderFilterPushDown::Exact,
         }
     }
 
@@ -218,6 +251,10 @@ impl SourceLevelFilter {
                 pattern,
             } => {
                 let matches = like_match(name, pattern, *case_insensitive)?;
+                Ok(if *negated { !matches } else { matches })
+            }
+            SourceLevelFilter::NameEqual { negated, value } => {
+                let matches = name == value;
                 Ok(if *negated { !matches } else { matches })
             }
         }
