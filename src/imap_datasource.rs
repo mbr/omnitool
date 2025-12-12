@@ -141,13 +141,28 @@ impl TableProvider for ImapMailboxesDataSource {
 #[derive(Debug)]
 enum SourceLevelFilter {
     /// A `name LIKE` or `name ILIKE` condition.
-    NameLike(String),
+    NameLike {
+        negated: bool,
+        case_insensitive: bool,
+        pattern: String,
+    },
 }
 
 impl Display for SourceLevelFilter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SourceLevelFilter::NameLike(pattern) => write!(f, "name LIKE {}", pattern),
+            SourceLevelFilter::NameLike {
+                negated,
+                case_insensitive,
+                pattern,
+            } => {
+                let not_str = if *negated { "NOT " } else { "" };
+                if *case_insensitive {
+                    write!(f, "name {}ILIKE {}", not_str, pattern)
+                } else {
+                    write!(f, "name {}LIKE {}", not_str, pattern)
+                }
+            }
         }
     }
 }
@@ -159,12 +174,21 @@ impl SourceLevelFilter {
     fn try_from_expr(expr: &Expr) -> Option<SourceLevelFilter> {
         match expr {
             Expr::Like(like) => {
+                // Reject if escape_char is set
+                if like.escape_char.is_some() {
+                    return None;
+                }
+
                 if let Expr::Column(col) = like.expr.as_ref()
                     && col.name() == "name"
                 {
                     if let Expr::Literal(scalar, _) = like.pattern.as_ref() {
                         if let Some(Some(val)) = scalar.try_as_str() {
-                            return Some(SourceLevelFilter::NameLike(val.to_owned()));
+                            return Some(SourceLevelFilter::NameLike {
+                                negated: like.negated,
+                                case_insensitive: like.case_insensitive,
+                                pattern: val.to_owned(),
+                            });
                         }
                     }
                 }
@@ -179,7 +203,7 @@ impl SourceLevelFilter {
     /// Used to communicate whether DataFusion will have to re-apply filtering later on.
     fn push_down_kind(&self) -> TableProviderFilterPushDown {
         match self {
-            SourceLevelFilter::NameLike(_) => TableProviderFilterPushDown::Exact,
+            SourceLevelFilter::NameLike { .. } => TableProviderFilterPushDown::Exact,
         }
     }
 
@@ -188,7 +212,14 @@ impl SourceLevelFilter {
     /// Returns `true` if the filter either matches or was not applied.
     fn matches_name_column(&self, name: &str) -> datafusion::common::Result<bool> {
         match self {
-            SourceLevelFilter::NameLike(pattern) => Ok(like_match(name, pattern)?),
+            SourceLevelFilter::NameLike {
+                negated,
+                case_insensitive,
+                pattern,
+            } => {
+                let matches = like_match(name, pattern, *case_insensitive)?;
+                Ok(if *negated { !matches } else { matches })
+            }
         }
     }
 }
@@ -196,12 +227,19 @@ impl SourceLevelFilter {
 /// Applies SQL LIKE pattern matching between a value and a pattern.
 ///
 /// Returns true if the value matches the pattern, false otherwise.
-pub fn like_match(value: &str, pattern: &str) -> Result<bool, arrow::error::ArrowError> {
+pub fn like_match(
+    value: &str,
+    pattern: &str,
+    case_insensitive: bool,
+) -> Result<bool, arrow::error::ArrowError> {
     let value_array = arrow::array::StringArray::from(vec![value]);
     let pattern_array = arrow::array::StringArray::from(vec![pattern]);
 
-    let result: arrow::array::BooleanArray =
-        arrow::compute::kernels::comparison::like(&value_array, &pattern_array)?;
+    let result: arrow::array::BooleanArray = if case_insensitive {
+        arrow::compute::kernels::comparison::ilike(&value_array, &pattern_array)?
+    } else {
+        arrow::compute::kernels::comparison::like(&value_array, &pattern_array)?
+    };
 
     Ok(result.value(0))
 }
