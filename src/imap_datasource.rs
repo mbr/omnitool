@@ -138,16 +138,18 @@ impl TableProvider for ImapMailboxesDataSource {
 /// Filters at the source level.
 ///
 /// Source level filters are expressed in the query or directly applied after loading.
-#[derive(Debug)]
+///
+/// Filters implement ordering by their estimated potential of reducing cardinality.
+#[derive(Debug, PartialEq, PartialOrd)]
 enum SourceLevelFilter {
     /// A `name LIKE` or `name ILIKE` condition.
     NameLike {
+        pattern: String,
         negated: bool,
         case_insensitive: bool,
-        pattern: String,
     },
     /// A `name = 'value'` or `name != 'value'` condition.
-    NameEqual { negated: bool, value: String },
+    NameEqual { value: String, negated: bool },
 }
 
 impl Display for SourceLevelFilter {
