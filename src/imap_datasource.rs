@@ -140,7 +140,7 @@ impl TableProvider for ImapMailboxesDataSource {
 /// Source level filters are expressed in the query or directly applied after loading.
 ///
 /// Filters implement ordering by their estimated potential of reducing cardinality.
-#[derive(Debug, PartialEq, PartialOrd)]
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum SourceLevelFilter {
     /// A `name LIKE` or `name ILIKE` condition.
     NameLike {
@@ -462,8 +462,16 @@ impl ImapExecPlan {
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
+            // Determine the most restrictive IMAP LIST pattern from filters
+            // Use the existing PartialOrd implementation to find the most restrictive filter
+            let imap_pattern = source_level_filters
+                .iter()
+                .max()
+                .and_then(SourceLevelFilter::query_string)
+                .unwrap_or_else(|| "*".to_string());
+
             let mut name_results = imap_session
-                .list(None, Some("*"))
+                .list(None, Some(&imap_pattern))
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
                 .map_err(|e| DataFusionError::External(Box::new(e)));
