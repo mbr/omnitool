@@ -261,6 +261,29 @@ impl SourceLevelFilter {
             }
         }
     }
+
+    /// Returns, if applicable, an IMAP `LIST` search pattern for this filter.
+    ///
+    /// The returned query pattern is inexact.
+    fn query_string(&self) -> Option<String> {
+        match self {
+            SourceLevelFilter::NameLike {
+                pattern,
+                negated,
+                case_insensitive,
+            } if !negated && !case_insensitive => sql_pattern_to_imap(pattern),
+            SourceLevelFilter::NameEqual { value, negated } if !negated => Some(value.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Converts a SQL LIKE pattern to an IMAP LIST pattern.
+///
+/// The returned search pattern may be more inclusive than the original.
+fn sql_pattern_to_imap(pattern: &str) -> Option<String> {
+    let imap_pattern = pattern.replace('%', "*").replace('_', "*");
+    Some(imap_pattern)
 }
 
 /// Applies SQL LIKE pattern matching between a value and a pattern.
