@@ -11,7 +11,7 @@ use arrow::{
 use async_trait::async_trait;
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    catalog::Session,
+    catalog::{SchemaProvider, Session},
     datasource::{TableProvider, TableType},
     error::DataFusionError,
     execution::{SendableRecordBatchStream, TaskContext},
@@ -54,6 +54,50 @@ pub struct ImapMailboxesDataSource {
     schema: SchemaRef,
     /// Connection pool for IMAP.
     pool: Arc<ImapPool>,
+}
+
+#[derive(Debug)]
+pub struct MailboxSchemaProvider {
+    /// Connection pool for IMAP.
+    pool: Arc<ImapPool>,
+    table_names: Vec<String>,
+}
+
+impl MailboxSchemaProvider {
+    pub async fn new(pool: Arc<ImapPool>) -> Result<Self, DataFusionError> {
+        let table_names = vec!["mailboxes".to_string()];
+
+        Ok(Self { pool, table_names })
+    }
+}
+
+#[async_trait]
+impl SchemaProvider for MailboxSchemaProvider {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn table_names(&self) -> Vec<String> {
+        self.table_names.clone()
+    }
+
+    async fn table(
+        &self,
+        name: &str,
+    ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
+        match name {
+            "mailboxes" => Ok(Some(Arc::new(ImapMailboxesDataSource::new(
+                self.pool.clone(),
+            )))),
+            _ => Ok(None),
+        }
+    }
+
+    fn table_exist(&self, name: &str) -> bool {
+        self.table_names
+            .binary_search_by_key(&name, |s| s.as_str())
+            .is_ok()
+    }
 }
 
 impl ImapMailboxesDataSource {
