@@ -26,7 +26,7 @@ use datafusion::{
         stream::RecordBatchStreamAdapter,
     },
 };
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 
 use crate::imap::{ImapConMan, ImapPool, ImapSession};
 
@@ -75,7 +75,7 @@ impl MailboxSchemaProvider {
         let table_names = {
             let mut imap_session = get_con(&pool).await?;
             let mut table_names: Vec<_> = list_mailboxes(&mut imap_session, "*")
-                .await?
+                .await
                 .try_collect()
                 .await?;
 
@@ -623,11 +623,16 @@ async fn get_con(pool: &ImapPool) -> DfResult<PooledConnection<'_, ImapConMan>> 
 async fn list_mailboxes(
     session: &mut ImapSession,
     pattern: &str,
-) -> DfResult<impl Stream<Item = DfResult<String>>> {
-    Ok(session
-        .list(None, Some(pattern))
-        .await
-        .map_err(|e| DataFusionError::External(Box::new(e)))?
-        .map_err(|e| DataFusionError::External(Box::new(e)))
-        .map(|result| result.map(|name| name.name().to_string())))
+) -> impl Stream<Item = DfResult<String>> {
+    futures::stream::once(
+        session
+            .list(None, Some(pattern))
+            .map_err(|e| DataFusionError::External(Box::new(e))),
+    )
+    .map_ok(|name_results| {
+        name_results
+            .map_err(|e| DataFusionError::External(Box::new(e)))
+            .map_ok(|name| name.name().to_owned())
+    })
+    .try_flatten()
 }
