@@ -11,6 +11,7 @@ use arrow::{
 use async_trait::async_trait;
 use datafusion::{
     arrow::datatypes::SchemaRef,
+    common::Result as DfResult
     catalog::{SchemaProvider, Session},
     datasource::{TableProvider, TableType},
     error::DataFusionError,
@@ -111,7 +112,7 @@ impl SchemaProvider for MailboxSchemaProvider {
     async fn table(
         &self,
         name: &str,
-    ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
+    ) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
         todo!()
     }
 
@@ -164,7 +165,7 @@ impl TableProvider for ImapMailboxesDataSource {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> DfResult<Arc<dyn ExecutionPlan>> {
         let mut source_level_filters = Vec::with_capacity(filters.len());
         for expr in filters {
             source_level_filters.push(SourceLevelFilter::try_from_expr(expr).ok_or_else(|| {
@@ -189,7 +190,7 @@ impl TableProvider for ImapMailboxesDataSource {
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> datafusion::common::Result<Vec<TableProviderFilterPushDown>> {
+    ) -> DfResult<Vec<TableProviderFilterPushDown>> {
         Ok(filters
             .into_iter()
             .map(|expr| {
@@ -311,7 +312,7 @@ impl SourceLevelFilter {
     /// Applies the source level filter to a given name.
     ///
     /// Returns `true` if the filter either matches or was not applied.
-    fn matches_name_column(&self, name: &str) -> datafusion::common::Result<bool> {
+    fn matches_name_column(&self, name: &str) -> DfResult<bool> {
         match self {
             SourceLevelFilter::NameLike {
                 negated,
@@ -387,7 +388,7 @@ impl ImapExecPlan {
         pool: Arc<ImapPool>,
         limit: Option<usize>,
         source_level_filters: Arc<[SourceLevelFilter]>,
-    ) -> datafusion::common::Result<Self> {
+    ) -> DfResult<Self> {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema.clone()),
             Partitioning::UnknownPartitioning(1),
@@ -478,7 +479,7 @@ impl ExecutionPlan for ImapExecPlan {
     fn with_new_children(
         self: Arc<Self>,
         _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> DfResult<Arc<dyn ExecutionPlan>> {
         Ok(self)
     }
 
@@ -486,7 +487,7 @@ impl ExecutionPlan for ImapExecPlan {
         &self,
         partition: usize,
         _context: Arc<TaskContext>,
-    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+    ) -> DfResult<SendableRecordBatchStream> {
         assert_eq!(partition, 0);
 
         let stream = futures::stream::once(self.build_batch());
@@ -506,7 +507,7 @@ impl ExecutionPlan for ImapExecPlan {
 impl ImapExecPlan {
     fn build_batch(
         &self,
-    ) -> impl Future<Output = datafusion::common::Result<RecordBatch>> + 'static {
+    ) -> impl Future<Output = DfResult<RecordBatch>> + 'static {
         let pool = self.pool.clone();
         let projected_schema = self.projected_schema.clone();
         let must_examine = self.must_examine();
