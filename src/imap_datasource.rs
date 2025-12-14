@@ -8,7 +8,7 @@ use arrow::{
     array::{ArrayRef, ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
     datatypes::{DataType, Field, Schema},
 };
-use async_imap::types::{Mailbox, Name};
+use async_imap::types::Name;
 use async_trait::async_trait;
 use bb8::PooledConnection;
 use datafusion::{
@@ -26,7 +26,7 @@ use datafusion::{
         stream::RecordBatchStreamAdapter,
     },
 };
-use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryFutureExt, TryStreamExt};
 
 use crate::imap::{ImapConMan, ImapPool, ImapSession};
 
@@ -76,6 +76,7 @@ impl MailboxSchemaProvider {
             let mut imap_session = get_con(&pool).await?;
             let mut table_names: Vec<_> = list_mailboxes(&mut imap_session, "*")
                 .await
+                .map_ok(|name| name.name().to_owned())
                 .try_collect()
                 .await?;
 
@@ -99,7 +100,10 @@ impl SchemaProvider for MailboxSchemaProvider {
         self.table_names.clone()
     }
 
-    async fn table(&self, name: &str) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
+    async fn table(
+        &self,
+        _name: &str,
+    ) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
         todo!()
     }
 
@@ -519,15 +523,13 @@ impl ImapExecPlan {
 
             let mut imap_session = get_con(&pool).await?;
 
-            let mut name_results = imap_session
-                .list(None, Some(&imap_pattern))
+            let all_names: Vec<_> = list_mailboxes(&mut imap_session, &imap_pattern)
                 .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?
-                .map_err(|e| DataFusionError::External(Box::new(e)));
+                .try_collect()
+                .await?;
 
             let mut mailbox_names = Vec::new();
-            while let Some(name_result) = name_results.next().await {
-                let name = name_result?;
+            for name in all_names {
                 let mut should_skip = false;
                 for filter in source_level_filters.iter() {
                     if !filter.matches_name_column(name.name())? {
@@ -557,7 +559,6 @@ impl ImapExecPlan {
 
                 mailbox_names.push(name.name().to_owned());
             }
-            drop(name_results);
 
             for mailbox_name in mailbox_names {
                 let examined = if must_examine {
@@ -623,16 +624,12 @@ async fn get_con(pool: &ImapPool) -> DfResult<PooledConnection<'_, ImapConMan>> 
 async fn list_mailboxes(
     session: &mut ImapSession,
     pattern: &str,
-) -> impl Stream<Item = DfResult<String>> {
+) -> impl Stream<Item = DfResult<Name>> {
     futures::stream::once(
         session
             .list(None, Some(pattern))
             .map_err(|e| DataFusionError::External(Box::new(e))),
     )
-    .map_ok(|name_results| {
-        name_results
-            .map_err(|e| DataFusionError::External(Box::new(e)))
-            .map_ok(|name| name.name().to_owned())
-    })
+    .map_ok(|name_results| name_results.map_err(|e| DataFusionError::External(Box::new(e))))
     .try_flatten()
 }
