@@ -63,7 +63,8 @@ pub struct ImapMailboxesDataSource {
 pub struct MailboxSchemaProvider {
     /// Connection pool for IMAP.
     pool: Arc<ImapPool>,
-    table_names: Vec<String>,
+    /// A handle to the runtime to execute code on in sync function.
+    rt_handle: tokio::runtime::Handle,
 }
 
 impl MailboxSchemaProvider {
@@ -71,22 +72,11 @@ impl MailboxSchemaProvider {
     ///
     /// Queries all available mailboxes on construction.
     // TODO: Make it query on demand instead.
-    pub async fn new(pool: Arc<ImapPool>) -> Result<Self, DataFusionError> {
-        let table_names = {
-            let mut imap_session = get_con(&pool).await?;
-            let mut table_names: Vec<_> = list_mailboxes(&mut imap_session, "*")
-                .await
-                .map_ok(|name| name.name().to_owned())
-                .try_collect()
-                .await?;
-
-            // Sort, since we'll be using `binary_search_by_key` to find tables.
-            table_names.sort();
-
-            table_names
-        };
-
-        Ok(Self { pool, table_names })
+    pub async fn new(
+        rt_handle: tokio::runtime::Handle,
+        pool: Arc<ImapPool>,
+    ) -> Result<Self, DataFusionError> {
+        Ok(Self { pool, rt_handle })
     }
 }
 
@@ -97,7 +87,22 @@ impl SchemaProvider for MailboxSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        self.table_names.clone()
+        let pool = self.pool.clone();
+        self.rt_handle.block_on(async move {
+            // This is less-than-idea, since we cannot refresh tables names and report an error.
+            let mut imap_session = get_con(&pool).await.expect("failed to get table names");
+            let mut table_names: Vec<_> = list_mailboxes(&mut imap_session, "*")
+                .await
+                .map_ok(|name| name.name().to_owned())
+                .try_collect()
+                .await
+                .expect("read error getting table names");
+
+            // Sort, since we'll be using `binary_search_by_key` to find tables.
+            table_names.sort();
+
+            table_names
+        })
     }
 
     async fn table(
@@ -108,7 +113,8 @@ impl SchemaProvider for MailboxSchemaProvider {
     }
 
     fn table_exist(&self, name: &str) -> bool {
-        self.table_names
+        // TODO: Actually look up using IMAP session instead.
+        self.table_names()
             .binary_search_by_key(&name, |s| s.as_str())
             .is_ok()
     }
