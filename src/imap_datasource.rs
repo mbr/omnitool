@@ -64,8 +64,35 @@ pub struct MailboxSchemaProvider {
 }
 
 impl MailboxSchemaProvider {
+    /// Constructs a new [`MailboxSchemaProvider`].
+    ///
+    /// Queries all available mailboxes on construction.
+    // TODO: Make it query on demand instead.
     pub async fn new(pool: Arc<ImapPool>) -> Result<Self, DataFusionError> {
-        let table_names = vec!["mailboxes".to_string()];
+        let table_names = {
+            let mut imap_session = pool
+                .get()
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+            let mut mailboxes = imap_session
+                .list(None, Some("*"))
+                .await
+                .map_err(|e| DataFusionError::External(Box::new(e)))?
+                .map_err(|e| DataFusionError::External(Box::new(e)));
+
+            let mut table_names = Vec::new();
+
+            while let Some(mailbox_result) = mailboxes.next().await {
+                let mailbox = mailbox_result?;
+                table_names.push(mailbox.name().to_string());
+            }
+
+            // Sort, since we'll be using `binary_search_by_key` to find tables.
+            table_names.sort();
+
+            table_names
+        };
 
         Ok(Self { pool, table_names })
     }
@@ -85,12 +112,7 @@ impl SchemaProvider for MailboxSchemaProvider {
         &self,
         name: &str,
     ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
-        match name {
-            "mailboxes" => Ok(Some(Arc::new(ImapMailboxesDataSource::new(
-                self.pool.clone(),
-            )))),
-            _ => Ok(None),
-        }
+        todo!()
     }
 
     fn table_exist(&self, name: &str) -> bool {
