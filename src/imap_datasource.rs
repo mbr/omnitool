@@ -8,11 +8,13 @@ use arrow::{
     array::{ArrayRef, ListBuilder, RecordBatch, StringBuilder, UInt32Builder},
     datatypes::{DataType, Field, Schema},
 };
+use async_imap::types::{Mailbox, Name};
 use async_trait::async_trait;
+use bb8::PooledConnection;
 use datafusion::{
     arrow::datatypes::SchemaRef,
-    common::Result as DfResult
     catalog::{SchemaProvider, Session},
+    common::Result as DfResult,
     datasource::{TableProvider, TableType},
     error::DataFusionError,
     execution::{SendableRecordBatchStream, TaskContext},
@@ -24,9 +26,9 @@ use datafusion::{
         stream::RecordBatchStreamAdapter,
     },
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 
-use crate::imap::ImapPool;
+use crate::imap::{ImapConMan, ImapPool, ImapSession};
 
 /// Formats a NameAttribute as a plain string.
 fn format_name_attribute<'a>(attr: &'a async_imap::types::NameAttribute<'a>) -> &'a str {
@@ -71,23 +73,11 @@ impl MailboxSchemaProvider {
     // TODO: Make it query on demand instead.
     pub async fn new(pool: Arc<ImapPool>) -> Result<Self, DataFusionError> {
         let table_names = {
-            let mut imap_session = pool
-                .get()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
-            let mut mailboxes = imap_session
-                .list(None, Some("*"))
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?
-                .map_err(|e| DataFusionError::External(Box::new(e)));
-
-            let mut table_names = Vec::new();
-
-            while let Some(mailbox_result) = mailboxes.next().await {
-                let mailbox = mailbox_result?;
-                table_names.push(mailbox.name().to_string());
-            }
+            let mut imap_session = get_con(&pool).await?;
+            let mut table_names: Vec<_> = list_mailboxes(&mut imap_session, "*")
+                .await?
+                .try_collect()
+                .await?;
 
             // Sort, since we'll be using `binary_search_by_key` to find tables.
             table_names.sort();
@@ -109,10 +99,7 @@ impl SchemaProvider for MailboxSchemaProvider {
         self.table_names.clone()
     }
 
-    async fn table(
-        &self,
-        name: &str,
-    ) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
+    async fn table(&self, name: &str) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
         todo!()
     }
 
@@ -505,9 +492,7 @@ impl ExecutionPlan for ImapExecPlan {
 }
 
 impl ImapExecPlan {
-    fn build_batch(
-        &self,
-    ) -> impl Future<Output = DfResult<RecordBatch>> + 'static {
+    fn build_batch(&self) -> impl Future<Output = DfResult<RecordBatch>> + 'static {
         let pool = self.pool.clone();
         let projected_schema = self.projected_schema.clone();
         let must_examine = self.must_examine();
@@ -524,11 +509,6 @@ impl ImapExecPlan {
             let mut recent_col = UInt32Builder::new();
             let mut unseen_col = UInt32Builder::new();
 
-            let mut imap_session = pool
-                .get()
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
-
             // Determine the most restrictive IMAP LIST pattern from filters
             // Use the existing PartialOrd implementation to find the most restrictive filter
             let imap_pattern = source_level_filters
@@ -536,6 +516,8 @@ impl ImapExecPlan {
                 .max()
                 .and_then(SourceLevelFilter::query_string)
                 .unwrap_or_else(|| "*".to_string());
+
+            let mut imap_session = get_con(&pool).await?;
 
             let mut name_results = imap_session
                 .list(None, Some(&imap_pattern))
@@ -627,4 +609,25 @@ impl ImapExecPlan {
             Ok(rb)
         }
     }
+}
+
+/// Fetches an IMAP connection from the connection, with the error wrapped in a [`datafusion`]
+/// friendly way.
+async fn get_con(pool: &ImapPool) -> DfResult<PooledConnection<'_, ImapConMan>> {
+    pool.get()
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))
+}
+
+/// Returns a stream of mailboxes matching a certain pattern.
+async fn list_mailboxes(
+    session: &mut ImapSession,
+    pattern: &str,
+) -> DfResult<impl Stream<Item = DfResult<String>>> {
+    Ok(session
+        .list(None, Some(pattern))
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))?
+        .map_err(|e| DataFusionError::External(Box::new(e)))
+        .map(|result| result.map(|name| name.name().to_string())))
 }
