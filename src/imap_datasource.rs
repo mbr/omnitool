@@ -80,8 +80,9 @@ pub struct ImapSingleMailboxTableProvider {
 }
 
 #[derive(Debug)]
-pub struct MailboxExecutionPlan {
+pub struct MailboxExecPlan {
     mailbox_name: String,
+    properties: PlanProperties,
     projected_schema: SchemaRef,
     limit: Option<usize>,
 }
@@ -226,15 +227,23 @@ impl TableProvider for ImapSingleMailboxTableProvider {
             self.schema.clone()
         };
 
-        Ok(Arc::new(MailboxExecutionPlan {
+        let properties = PlanProperties::new(
+            EquivalenceProperties::new(projected_schema.clone()),
+            Partitioning::UnknownPartitioning(1),
+            EmissionType::Incremental,
+            Boundedness::Bounded,
+        );
+
+        Ok(Arc::new(MailboxExecPlan {
             mailbox_name: self.mailbox_name.clone(),
+            properties,
             projected_schema,
             limit,
         }))
     }
 }
 
-impl DisplayAs for MailboxExecutionPlan {
+impl DisplayAs for MailboxExecPlan {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         let limit = match self.limit {
             Some(limit) => limit.to_string(),
@@ -263,7 +272,7 @@ impl DisplayAs for MailboxExecutionPlan {
 }
 
 #[async_trait]
-impl ExecutionPlan for MailboxExecutionPlan {
+impl ExecutionPlan for MailboxExecPlan {
     fn name(&self) -> &str {
         "MailboxExecutionPlan"
     }
@@ -273,18 +282,18 @@ impl ExecutionPlan for MailboxExecutionPlan {
     }
 
     fn properties(&self) -> &PlanProperties {
-        todo!()
+        &self.properties
     }
 
     fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
-        todo!()
+        Vec::new()
     }
 
     fn with_new_children(
         self: Arc<Self>,
-        children: Vec<Arc<dyn ExecutionPlan>>,
+        _children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
-        todo!()
+        Ok(self)
     }
 
     fn execute(
