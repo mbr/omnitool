@@ -208,10 +208,10 @@ impl TableProvider for ImapSingleMailboxTableProvider {
 
     async fn scan(
         &self,
-        state: &dyn Session,
-        projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
+        _state: &dyn Session,
+        _projection: Option<&Vec<usize>>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
         todo!()
     }
