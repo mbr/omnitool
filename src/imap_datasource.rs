@@ -53,9 +53,12 @@ struct AccountExecPlan {
     /// `LIMIT` to apply.
     limit: Option<usize>,
     /// Filters that have been pushed down to this data source.
-    source_level_filters: Arc<[SourceLevelFilter]>,
+    source_filters: Arc<[AccountSourceFilters]>,
 }
 
+/// Schema provider for all mailboxes.
+///
+/// Provides schemas for the "mailbox table" (actual mail) of every available mailbox on the server.
 #[derive(Debug)]
 pub struct MailboxesSchemaProvider {
     /// Connection pool for IMAP.
@@ -66,6 +69,7 @@ pub struct MailboxesSchemaProvider {
     schema: SchemaRef,
 }
 
+/// Table provider for a single IMAP mailbox.
 #[derive(Debug)]
 pub struct MailboxTableProvider {
     /// Schema for this mailbox.
@@ -76,11 +80,16 @@ pub struct MailboxTableProvider {
     mailbox_name: String,
 }
 
+/// Execution plan for [`MailboxTableProvider`].
 #[derive(Debug)]
 pub struct MailboxExecPlan {
+    /// Name of the mailbox.
     mailbox_name: String,
+    /// Precomputed properties of this execution plan.
     properties: PlanProperties,
+    /// Pre-projected schema.
     projected_schema: SchemaRef,
+    /// Pushed down `LIMIT` clause.
     limit: Option<usize>,
 }
 
@@ -90,7 +99,7 @@ pub struct MailboxExecPlan {
 ///
 /// Filters implement ordering by their estimated potential of reducing cardinality.
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum SourceLevelFilter {
+enum AccountSourceFilters {
     /// A `name LIKE` or `name ILIKE` condition.
     NameLike {
         pattern: String,
@@ -364,9 +373,9 @@ impl TableProvider for AccountTableProvider {
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
         let mut source_level_filters = Vec::with_capacity(filters.len());
         for expr in filters {
-            source_level_filters.push(SourceLevelFilter::try_from_expr(expr).ok_or_else(|| {
-                DataFusionError::Internal(format!("unexpected filter pushdown of {}", expr))
-            })?)
+            source_level_filters.push(AccountSourceFilters::try_from_expr(expr).ok_or_else(
+                || DataFusionError::Internal(format!("unexpected filter pushdown of {}", expr)),
+            )?)
         }
 
         let projected_schema = if let Some(ref projection) = projection {
@@ -390,7 +399,7 @@ impl TableProvider for AccountTableProvider {
         Ok(filters
             .into_iter()
             .map(|expr| {
-                SourceLevelFilter::try_from_expr(expr)
+                AccountSourceFilters::try_from_expr(expr)
                     .map(|slf| slf.push_down_kind())
                     .unwrap_or(TableProviderFilterPushDown::Unsupported)
             })
@@ -398,10 +407,10 @@ impl TableProvider for AccountTableProvider {
     }
 }
 
-impl Display for SourceLevelFilter {
+impl Display for AccountSourceFilters {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SourceLevelFilter::NameLike {
+            AccountSourceFilters::NameLike {
                 negated,
                 case_insensitive,
                 pattern,
@@ -413,7 +422,7 @@ impl Display for SourceLevelFilter {
                     write!(f, "name {}LIKE {}", not_str, pattern)
                 }
             }
-            SourceLevelFilter::NameEqual { negated, value } => {
+            AccountSourceFilters::NameEqual { negated, value } => {
                 let op = if *negated { "!=" } else { "=" };
                 write!(f, "name {} '{}'", op, value)
             }
@@ -421,11 +430,11 @@ impl Display for SourceLevelFilter {
     }
 }
 
-impl SourceLevelFilter {
-    /// Tries to create a new [`SourceLevelFilter`] from a given [`Expr`].
+impl AccountSourceFilters {
+    /// Tries to create a new [`AccountSourceFilters`] from a given [`Expr`].
     ///
     /// Returns `None` if the specific expression is not supported.
-    fn try_from_expr(expr: &Expr) -> Option<SourceLevelFilter> {
+    fn try_from_expr(expr: &Expr) -> Option<AccountSourceFilters> {
         match expr {
             Expr::Like(like) => {
                 // Reject if escape_char is set
@@ -438,7 +447,7 @@ impl SourceLevelFilter {
                 {
                     if let Expr::Literal(scalar, _) = like.pattern.as_ref() {
                         if let Some(Some(val)) = scalar.try_as_str() {
-                            return Some(SourceLevelFilter::NameLike {
+                            return Some(AccountSourceFilters::NameLike {
                                 negated: like.negated,
                                 case_insensitive: like.case_insensitive,
                                 pattern: val.to_owned(),
@@ -465,7 +474,7 @@ impl SourceLevelFilter {
                     // Check if right side is a literal string
                     if let Expr::Literal(scalar, _) = binary_expr.right.as_ref() {
                         if let Some(Some(val)) = scalar.try_as_str() {
-                            return Some(SourceLevelFilter::NameEqual {
+                            return Some(AccountSourceFilters::NameEqual {
                                 negated,
                                 value: val.to_owned(),
                             });
@@ -483,8 +492,8 @@ impl SourceLevelFilter {
     /// Used to communicate whether DataFusion will have to re-apply filtering later on.
     fn push_down_kind(&self) -> TableProviderFilterPushDown {
         match self {
-            SourceLevelFilter::NameLike { .. } => TableProviderFilterPushDown::Exact,
-            SourceLevelFilter::NameEqual { .. } => TableProviderFilterPushDown::Exact,
+            AccountSourceFilters::NameLike { .. } => TableProviderFilterPushDown::Exact,
+            AccountSourceFilters::NameEqual { .. } => TableProviderFilterPushDown::Exact,
         }
     }
 
@@ -493,7 +502,7 @@ impl SourceLevelFilter {
     /// Returns `true` if the filter either matches or was not applied.
     fn matches_name_column(&self, name: &str) -> DfResult<bool> {
         match self {
-            SourceLevelFilter::NameLike {
+            AccountSourceFilters::NameLike {
                 negated,
                 case_insensitive,
                 pattern,
@@ -501,7 +510,7 @@ impl SourceLevelFilter {
                 let matches = like_match(name, pattern, *case_insensitive)?;
                 Ok(if *negated { !matches } else { matches })
             }
-            SourceLevelFilter::NameEqual { negated, value } => {
+            AccountSourceFilters::NameEqual { negated, value } => {
                 let matches = name == value;
                 Ok(if *negated { !matches } else { matches })
             }
@@ -513,12 +522,12 @@ impl SourceLevelFilter {
     /// The returned query pattern is inexact.
     fn query_string(&self) -> Option<String> {
         match self {
-            SourceLevelFilter::NameLike {
+            AccountSourceFilters::NameLike {
                 pattern,
                 negated,
                 case_insensitive,
             } if !negated && !case_insensitive => sql_pattern_to_imap(pattern),
-            SourceLevelFilter::NameEqual { value, negated } if !negated => Some(value.clone()),
+            AccountSourceFilters::NameEqual { value, negated } if !negated => Some(value.clone()),
             _ => None,
         }
     }
@@ -557,7 +566,7 @@ impl AccountExecPlan {
         projected_schema: SchemaRef,
         pool: Arc<ImapPool>,
         limit: Option<usize>,
-        source_level_filters: Arc<[SourceLevelFilter]>,
+        source_level_filters: Arc<[AccountSourceFilters]>,
     ) -> DfResult<Self> {
         let properties = PlanProperties::new(
             EquivalenceProperties::new(projected_schema.clone()),
@@ -571,7 +580,7 @@ impl AccountExecPlan {
             pool,
             projected_schema,
             limit,
-            source_level_filters,
+            source_filters: source_level_filters,
         })
     }
 }
@@ -591,7 +600,7 @@ impl DisplayAs for AccountExecPlan {
                     self.must_examine(),
                     limit
                 )?;
-                for (idx, filter) in self.source_level_filters.iter().enumerate() {
+                for (idx, filter) in self.source_filters.iter().enumerate() {
                     if idx != 0 {
                         f.write_str(", ")?;
                     }
@@ -607,7 +616,7 @@ impl DisplayAs for AccountExecPlan {
                     self.must_examine(),
                     limit
                 )?;
-                for filter in self.source_level_filters.iter() {
+                for filter in self.source_filters.iter() {
                     write!(f, "\n{}", filter)?;
                 }
                 Ok(())
@@ -680,7 +689,7 @@ impl AccountExecPlan {
         let projected_schema = self.projected_schema.clone();
         let must_examine = self.must_examine();
         let mut limit = self.limit.unwrap_or(usize::MAX);
-        let source_level_filters = self.source_level_filters.clone();
+        let source_level_filters = self.source_filters.clone();
 
         async move {
             let mut name_col = StringBuilder::new();
@@ -697,7 +706,7 @@ impl AccountExecPlan {
             let imap_pattern = source_level_filters
                 .iter()
                 .max()
-                .and_then(SourceLevelFilter::query_string)
+                .and_then(AccountSourceFilters::query_string)
                 .unwrap_or_else(|| "*".to_string());
 
             let mut imap_session = get_con(&pool).await?;
