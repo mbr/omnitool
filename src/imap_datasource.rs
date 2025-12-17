@@ -65,18 +65,89 @@ pub struct MailboxSchemaProvider {
     pool: Arc<ImapPool>,
     /// A handle to the runtime to execute code on in sync function.
     rt_handle: tokio::runtime::Handle,
+    /// Schema for a single mailbox.
+    schema: SchemaRef,
+}
+
+#[derive(Debug)]
+pub struct ImapSingleMailboxTableProvider {
+    /// Schema for this mailbox.
+    schema: SchemaRef,
+    /// Connection pool for IMAP.
+    pool: Arc<ImapPool>,
+    /// Name of the mailbox.
+    mailbox_name: String,
 }
 
 impl MailboxSchemaProvider {
     /// Constructs a new [`MailboxSchemaProvider`].
-    ///
-    /// Queries all available mailboxes on construction.
-    // TODO: Make it query on demand instead.
     pub async fn new(
         rt_handle: tokio::runtime::Handle,
         pool: Arc<ImapPool>,
     ) -> Result<Self, DataFusionError> {
-        Ok(Self { pool, rt_handle })
+        use arrow::datatypes::TimeUnit;
+
+        let schema = Schema::new(vec![
+            // Identifiers
+            Field::new("uid", DataType::UInt32, false),
+            Field::new("message_id", DataType::Utf8, true),
+            Field::new("thread_id", DataType::Utf8, true),
+            Field::new(
+                "references",
+                DataType::List(Arc::new(Field::new("ref", DataType::Utf8, false))),
+                true,
+            ),
+            // Timestamps
+            Field::new("date", DataType::Timestamp(TimeUnit::Second, None), true),
+            Field::new(
+                "internal_date",
+                DataType::Timestamp(TimeUnit::Second, None),
+                false,
+            ),
+            // Addresses
+            Field::new("from", DataType::Utf8, true),
+            Field::new(
+                "to",
+                DataType::List(Arc::new(Field::new("addr", DataType::Utf8, false))),
+                true,
+            ),
+            Field::new(
+                "cc",
+                DataType::List(Arc::new(Field::new("addr", DataType::Utf8, false))),
+                true,
+            ),
+            Field::new(
+                "bcc",
+                DataType::List(Arc::new(Field::new("addr", DataType::Utf8, false))),
+                true,
+            ),
+            Field::new("reply_to", DataType::Utf8, true),
+            // Content
+            Field::new("subject", DataType::Utf8, true),
+            Field::new("size", DataType::UInt64, false),
+            // Flags
+            Field::new(
+                "flags",
+                DataType::List(Arc::new(Field::new("flag", DataType::Utf8, false))),
+                false,
+            ),
+            // Structure
+            Field::new("has_attachments", DataType::Boolean, true),
+            Field::new("attachment_count", DataType::UInt32, true),
+            Field::new("content_type", DataType::Utf8, true),
+            // Mailing Lists & Organization
+            Field::new("list_id", DataType::Utf8, true),
+            Field::new("precedence", DataType::Utf8, true),
+            // Optional/Extended
+            Field::new("importance", DataType::Utf8, true),
+            Field::new("delivered_to", DataType::Utf8, true),
+        ]);
+
+        Ok(Self {
+            schema: Arc::new(schema),
+            pool,
+            rt_handle,
+        })
     }
 }
 
