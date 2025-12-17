@@ -265,11 +265,11 @@ impl DisplayAs for MailboxExecutionPlan {
 #[async_trait]
 impl ExecutionPlan for MailboxExecutionPlan {
     fn name(&self) -> &str {
-        todo!()
+        "MailboxExecutionPlan"
     }
 
     fn as_any(&self) -> &dyn Any {
-        todo!()
+        self
     }
 
     fn properties(&self) -> &PlanProperties {
