@@ -56,6 +56,10 @@ async fn create_context(config: Arc<Config>) -> anyhow::Result<SessionContext> {
 /// Main entry point for the omnitool IMAP email search application.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_timestamp_millis()
+        .init();
+
     let cmd = Command::from_args();
 
     match cmd {

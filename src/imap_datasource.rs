@@ -192,6 +192,7 @@ impl SchemaProvider for MailboxSchemaProvider {
     }
 }
 
+#[async_trait]
 impl TableProvider for ImapSingleMailboxTableProvider {
     fn as_any(&self) -> &dyn Any {
         todo!()
