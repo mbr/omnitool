@@ -79,6 +79,13 @@ pub struct ImapSingleMailboxTableProvider {
     mailbox_name: String,
 }
 
+#[derive(Debug)]
+pub struct MailboxExecutionPlan {
+    mailbox_name: String,
+    projected_schema: SchemaRef,
+    limit: Option<usize>,
+}
+
 impl MailboxSchemaProvider {
     /// Constructs a new [`MailboxSchemaProvider`].
     pub async fn new(
@@ -195,24 +202,96 @@ impl SchemaProvider for MailboxSchemaProvider {
 #[async_trait]
 impl TableProvider for ImapSingleMailboxTableProvider {
     fn as_any(&self) -> &dyn Any {
-        todo!()
+        self
     }
 
     fn schema(&self) -> SchemaRef {
-        todo!()
+        self.schema.clone()
     }
 
     fn table_type(&self) -> TableType {
-        todo!()
+        TableType::Base
     }
 
     async fn scan(
         &self,
         _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
+        projection: Option<&Vec<usize>>,
         _filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
     ) -> DfResult<Arc<dyn ExecutionPlan>> {
+        let projected_schema = if let Some(projection) = projection {
+            Arc::new(self.schema.project(projection.as_ref())?)
+        } else {
+            self.schema.clone()
+        };
+
+        Ok(Arc::new(MailboxExecutionPlan {
+            mailbox_name: self.mailbox_name.clone(),
+            projected_schema,
+            limit,
+        }))
+    }
+}
+
+impl DisplayAs for MailboxExecutionPlan {
+    fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
+        let limit = match self.limit {
+            Some(limit) => limit.to_string(),
+            None => String::from("None"),
+        };
+        match t {
+            DisplayFormatType::Default => {
+                write!(f, "MailboxExecutionPlan({})", self.mailbox_name)
+            }
+            DisplayFormatType::Verbose => {
+                write!(
+                    f,
+                    "MailboxExecutionPlan({}) limit={}",
+                    self.mailbox_name, limit
+                )
+            }
+            DisplayFormatType::TreeRender => {
+                write!(
+                    f,
+                    "MailboxExecutionPlan\nmailbox={}\nlimit={}",
+                    self.mailbox_name, limit
+                )
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl ExecutionPlan for MailboxExecutionPlan {
+    fn name(&self) -> &str {
+        todo!()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        todo!()
+    }
+
+    fn properties(&self) -> &PlanProperties {
+        todo!()
+    }
+
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        todo!()
+    }
+
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> DfResult<Arc<dyn ExecutionPlan>> {
+        todo!()
+    }
+
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> DfResult<SendableRecordBatchStream> {
         todo!()
     }
 }
