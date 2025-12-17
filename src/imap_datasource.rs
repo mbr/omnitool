@@ -30,29 +30,9 @@ use futures::{Stream, TryFutureExt, TryStreamExt};
 
 use crate::imap::{ImapConMan, ImapPool, ImapSession};
 
-/// Formats a NameAttribute as a plain string.
-fn format_name_attribute<'a>(attr: &'a async_imap::types::NameAttribute<'a>) -> &'a str {
-    use async_imap::types::NameAttribute;
-    match attr {
-        NameAttribute::NoInferiors => "NoInferiors",
-        NameAttribute::NoSelect => "NoSelect",
-        NameAttribute::Marked => "Marked",
-        NameAttribute::Unmarked => "Unmarked",
-        NameAttribute::All => "All",
-        NameAttribute::Archive => "Archive",
-        NameAttribute::Drafts => "Drafts",
-        NameAttribute::Flagged => "Flagged",
-        NameAttribute::Junk => "Junk",
-        NameAttribute::Sent => "Sent",
-        NameAttribute::Trash => "Trash",
-        NameAttribute::Extension(s) => s.as_ref().strip_prefix('\\').unwrap_or(s.as_ref()),
-        _ => "Unknown",
-    }
-}
-
-/// A datasource for imap mailboxes.
+/// A datasource for IMAP mailboxes.
 #[derive(Debug)]
-pub struct ImapMailboxesDataSource {
+pub struct AccountTableProvider {
     /// The schema for our only table.
     schema: SchemaRef,
     /// Connection pool for IMAP.
@@ -60,7 +40,16 @@ pub struct ImapMailboxesDataSource {
 }
 
 #[derive(Debug)]
-pub struct MailboxSchemaProvider {
+struct AccountExecPlan {
+    properties: PlanProperties,
+    pool: Arc<ImapPool>,
+    projected_schema: SchemaRef,
+    limit: Option<usize>,
+    source_level_filters: Arc<[SourceLevelFilter]>,
+}
+
+#[derive(Debug)]
+pub struct MailboxesSchemaProvider {
     /// Connection pool for IMAP.
     pool: Arc<ImapPool>,
     /// A handle to the runtime to execute code on in sync function.
@@ -70,7 +59,7 @@ pub struct MailboxSchemaProvider {
 }
 
 #[derive(Debug)]
-pub struct ImapSingleMailboxTableProvider {
+pub struct MailboxTableProvider {
     /// Schema for this mailbox.
     schema: SchemaRef,
     /// Connection pool for IMAP.
@@ -87,8 +76,25 @@ pub struct MailboxExecPlan {
     limit: Option<usize>,
 }
 
-impl MailboxSchemaProvider {
-    /// Constructs a new [`MailboxSchemaProvider`].
+/// Filters at the source level.
+///
+/// Source level filters are expressed in the query or directly applied after loading.
+///
+/// Filters implement ordering by their estimated potential of reducing cardinality.
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum SourceLevelFilter {
+    /// A `name LIKE` or `name ILIKE` condition.
+    NameLike {
+        pattern: String,
+        negated: bool,
+        case_insensitive: bool,
+    },
+    /// A `name = 'value'` or `name != 'value'` condition.
+    NameEqual { value: String, negated: bool },
+}
+
+impl MailboxesSchemaProvider {
+    /// Constructs a new [`MailboxesSchemaProvider`].
     pub async fn new(
         rt_handle: tokio::runtime::Handle,
         pool: Arc<ImapPool>,
@@ -160,7 +166,7 @@ impl MailboxSchemaProvider {
 }
 
 #[async_trait]
-impl SchemaProvider for MailboxSchemaProvider {
+impl SchemaProvider for MailboxesSchemaProvider {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -185,7 +191,7 @@ impl SchemaProvider for MailboxSchemaProvider {
     }
 
     async fn table(&self, name: &str) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
-        Ok(Some(Arc::new(ImapSingleMailboxTableProvider {
+        Ok(Some(Arc::new(MailboxTableProvider {
             schema: self.schema.clone(),
             pool: self.pool.clone(),
             mailbox_name: name.to_owned(),
@@ -201,7 +207,7 @@ impl SchemaProvider for MailboxSchemaProvider {
 }
 
 #[async_trait]
-impl TableProvider for ImapSingleMailboxTableProvider {
+impl TableProvider for MailboxTableProvider {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -305,7 +311,7 @@ impl ExecutionPlan for MailboxExecPlan {
     }
 }
 
-impl ImapMailboxesDataSource {
+impl AccountTableProvider {
     pub fn new(pool: Arc<ImapPool>) -> Self {
         let schema = Schema::new(vec![
             Field::new("name", DataType::Utf8, false),
@@ -328,7 +334,7 @@ impl ImapMailboxesDataSource {
 }
 
 #[async_trait]
-impl TableProvider for ImapMailboxesDataSource {
+impl TableProvider for AccountTableProvider {
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
     }
@@ -361,7 +367,7 @@ impl TableProvider for ImapMailboxesDataSource {
             self.schema()
         };
 
-        Ok(Arc::new(ImapExecPlan::new(
+        Ok(Arc::new(AccountExecPlan::new(
             projected_schema,
             self.pool.clone(),
             limit,
@@ -382,23 +388,6 @@ impl TableProvider for ImapMailboxesDataSource {
             })
             .collect())
     }
-}
-
-/// Filters at the source level.
-///
-/// Source level filters are expressed in the query or directly applied after loading.
-///
-/// Filters implement ordering by their estimated potential of reducing cardinality.
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum SourceLevelFilter {
-    /// A `name LIKE` or `name ILIKE` condition.
-    NameLike {
-        pattern: String,
-        negated: bool,
-        case_insensitive: bool,
-    },
-    /// A `name = 'value'` or `name != 'value'` condition.
-    NameEqual { value: String, negated: bool },
 }
 
 impl Display for SourceLevelFilter {
@@ -555,16 +544,7 @@ pub fn like_match(
     Ok(result.value(0))
 }
 
-#[derive(Debug)]
-struct ImapExecPlan {
-    properties: PlanProperties,
-    pool: Arc<ImapPool>,
-    projected_schema: SchemaRef,
-    limit: Option<usize>,
-    source_level_filters: Arc<[SourceLevelFilter]>,
-}
-
-impl ImapExecPlan {
+impl AccountExecPlan {
     fn new(
         projected_schema: SchemaRef,
         pool: Arc<ImapPool>,
@@ -588,7 +568,7 @@ impl ImapExecPlan {
     }
 }
 
-impl DisplayAs for ImapExecPlan {
+impl DisplayAs for AccountExecPlan {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> std::fmt::Result {
         let limit = match self.limit {
             Some(limit) => limit.to_string(),
@@ -628,7 +608,7 @@ impl DisplayAs for ImapExecPlan {
     }
 }
 
-impl ImapExecPlan {
+impl AccountExecPlan {
     /// Returns whether the query must examine mailboxes individually.
     fn must_examine(&self) -> bool {
         self.projected_schema.column_with_name("exists").is_some()
@@ -637,7 +617,7 @@ impl ImapExecPlan {
     }
 }
 
-impl ExecutionPlan for ImapExecPlan {
+impl ExecutionPlan for AccountExecPlan {
     fn name(&self) -> &str {
         "ImapExecPlan"
     }
@@ -686,7 +666,7 @@ impl ExecutionPlan for ImapExecPlan {
     }
 }
 
-impl ImapExecPlan {
+impl AccountExecPlan {
     fn build_batch(&self) -> impl Future<Output = DfResult<RecordBatch>> + 'static {
         let pool = self.pool.clone();
         let projected_schema = self.projected_schema.clone();
@@ -823,4 +803,24 @@ async fn list_mailboxes(
     )
     .map_ok(|name_results| name_results.map_err(|e| DataFusionError::External(Box::new(e))))
     .try_flatten()
+}
+
+/// Formats a NameAttribute as a plain string.
+fn format_name_attribute<'a>(attr: &'a async_imap::types::NameAttribute<'a>) -> &'a str {
+    use async_imap::types::NameAttribute;
+    match attr {
+        NameAttribute::NoInferiors => "NoInferiors",
+        NameAttribute::NoSelect => "NoSelect",
+        NameAttribute::Marked => "Marked",
+        NameAttribute::Unmarked => "Unmarked",
+        NameAttribute::All => "All",
+        NameAttribute::Archive => "Archive",
+        NameAttribute::Drafts => "Drafts",
+        NameAttribute::Flagged => "Flagged",
+        NameAttribute::Junk => "Junk",
+        NameAttribute::Sent => "Sent",
+        NameAttribute::Trash => "Trash",
+        NameAttribute::Extension(s) => s.as_ref().strip_prefix('\\').unwrap_or(s.as_ref()),
+        _ => "Unknown",
+    }
 }
