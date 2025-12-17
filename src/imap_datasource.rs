@@ -31,20 +31,28 @@ use futures::{Stream, TryFutureExt, TryStreamExt};
 use crate::imap::{ImapConMan, ImapPool, ImapSession};
 
 /// A datasource for IMAP mailboxes.
+///
+/// The provided table lists (through IMAP `LIST`) all mailboxes available on a given connection.
 #[derive(Debug)]
 pub struct AccountTableProvider {
     /// The schema for our only table.
     schema: SchemaRef,
-    /// Connection pool for IMAP.
+    /// Connection pool for IMAP commands.
     pool: Arc<ImapPool>,
 }
 
+/// Execution plan for [`AccountTableProvider`].
 #[derive(Debug)]
 struct AccountExecPlan {
+    /// Execution plan properties.
     properties: PlanProperties,
+    /// Connection pool to run IMAP commands on.
     pool: Arc<ImapPool>,
+    /// Pre-projected schema.
     projected_schema: SchemaRef,
+    /// `LIMIT` to apply.
     limit: Option<usize>,
+    /// Filters that have been pushed down to this data source.
     source_level_filters: Arc<[SourceLevelFilter]>,
 }
 
