@@ -176,11 +176,12 @@ impl SchemaProvider for MailboxSchemaProvider {
         })
     }
 
-    async fn table(
-        &self,
-        _name: &str,
-    ) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
-        todo!()
+    async fn table(&self, name: &str) -> DfResult<Option<Arc<dyn TableProvider>>, DataFusionError> {
+        Ok(Some(Arc::new(ImapSingleMailboxTableProvider {
+            schema: self.schema.clone(),
+            pool: self.pool.clone(),
+            mailbox_name: name.to_owned(),
+        })))
     }
 
     fn table_exist(&self, name: &str) -> bool {
@@ -188,6 +189,30 @@ impl SchemaProvider for MailboxSchemaProvider {
         self.table_names()
             .binary_search_by_key(&name, |s| s.as_str())
             .is_ok()
+    }
+}
+
+impl TableProvider for ImapSingleMailboxTableProvider {
+    fn as_any(&self) -> &dyn Any {
+        todo!()
+    }
+
+    fn schema(&self) -> SchemaRef {
+        todo!()
+    }
+
+    fn table_type(&self) -> TableType {
+        todo!()
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> DfResult<Arc<dyn ExecutionPlan>> {
+        todo!()
     }
 }
 
